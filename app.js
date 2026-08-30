@@ -1,7 +1,7 @@
 const app = document.querySelector("#app");
 const toast = document.querySelector("#toast");
 const topbar = document.querySelector("#topbar");
-const state = { createType: null, createStep: 1, currentBook: null, currentUserId: null, authKind: null, giftSession: null, autoSave: null, bookWritingFull: false, giftCreateType: null, giftCreateStep: 1, giftDraft: null, giftCover: null, giftResult: null, giftSubmitting: false, giftCopyTimer: null, profileSaved: false };
+const state = { createType: null, createStep: 1, currentBook: null, currentUserId: null, authKind: null, giftSession: null, autoSave: null, bookWritingFull: false, giftCreateType: null, giftCreateStep: 1, giftDraft: null, giftCover: null, giftResult: null, giftSubmitting: false, giftCopyTimer: null, profileSaved: false, renderId: 0 };
 const createClient = window.supabase?.createClient;
 let authClient = null;
 let authReady = null;
@@ -242,6 +242,7 @@ function formatMomentDetailTime(time) {
 
 async function render() {
   clearInterval(state.autoSave); state.autoSave = null;
+  const renderId = ++state.renderId;
   const [route, ...params] = (location.hash.slice(1) || "home").split("/");
   if (route !== "book") state.bookWritingFull = false;
   document.body.classList.toggle("home-route", route === "home");
@@ -259,8 +260,8 @@ async function render() {
     state.currentUserId = auth.session?.user?.id || null;
     state.authKind = auth.authKind || (auth.session ? "account" : null);
     state.giftSession = auth.giftSession || null;
-    const writingBooks = auth.session ? await getShortcutBooks(auth) : [];
-    renderTopGnb(auth, writingBooks);
+    renderTopGnb(auth);
+    if (auth.session) refreshShortcutBooks(auth, renderId);
     if (route === "admin" && auth.isAdmin !== true) { location.hash = "#home"; return; }
     if (route === "home") return home();
     if (route === "books") return books();
@@ -295,18 +296,30 @@ async function getShortcutBooks(auth) {
   }));
 }
 
+function shortcutMarkup(writingBooks = []) {
+  if (writingBooks.length === 1) return `<a class="home-shortcut-link" href="#book/${writingBooks[0].id}/${writingBooks[0].shortcutPage}">바로가기</a>`;
+  if (writingBooks.length > 1) return `<details class="home-shortcut-menu"><summary>바로가기</summary><div class="home-shortcut-options">${writingBooks.map((book) => `<a href="#book/${book.id}/${book.shortcutPage}">${escapeHtml(book.title)}</a>`).join("")}</div></details>`;
+  return "";
+}
+
+async function refreshShortcutBooks(auth, renderId) {
+  try {
+    const writingBooks = await getShortcutBooks(auth);
+    if (renderId !== state.renderId || !topbar.querySelector("[data-shortcut-slot]")) return;
+    topbar.querySelector("[data-shortcut-slot]").outerHTML = shortcutMarkup(writingBooks);
+    topbar.querySelectorAll(".home-nav a, .home-nav-action, .home-shortcut-menu summary").forEach((label) => label.classList.add("home-gnb-label"));
+  } catch {}
+}
+
 function renderTopGnb(auth, writingBooks = []) {
   const loggedIn = Boolean(auth.session);
   const giftLoggedIn = auth.authKind === "gift" && Boolean(auth.giftSession?.bookId);
   const isAdmin = auth.isAdmin === true;
-  const shortcut = writingBooks.length === 1
-    ? `<a class="home-shortcut-link" href="#book/${writingBooks[0].id}/${writingBooks[0].shortcutPage}">바로가기</a>`
-    : writingBooks.length > 1
-      ? `<details class="home-shortcut-menu"><summary>바로가기</summary><div class="home-shortcut-options">${writingBooks.map((book) => `<a href="#book/${book.id}/${book.shortcutPage}">${escapeHtml(book.title)}</a>`).join("")}</div></details>`
-      : "";
+  const shortcut = shortcutMarkup(writingBooks);
   const shortcutMenu = shortcut ? `${shortcut}<span class="home-divider" aria-hidden="true"></span>` : "";
+  const shortcutSlot = writingBooks.length ? shortcutMenu : `<span data-shortcut-slot></span>`;
   const menu = loggedIn
-    ? `<a href="#books">내 이야기</a><span class="home-divider" aria-hidden="true"></span><a href="#profile">${escapeHtml(auth.user?.displayName || "사용자")}</a><span class="home-divider" aria-hidden="true"></span>${shortcutMenu}<a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span><a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#home" aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>${auth.moments?.canWrite === true ? `<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#moments" aria-label="Moments"><img src="/assets/icn_time.svg" alt="" aria-hidden="true"></a>` : ""}${isAdmin ? `<span class="home-divider" aria-hidden="true"></span><a href="#admin/dashboard">관리자</a>` : ""}<span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-logout>로그아웃</button>`
+    ? `<a href="#books">내 이야기</a><span class="home-divider" aria-hidden="true"></span><a href="#profile">${escapeHtml(auth.user?.displayName || "사용자")}</a><span class="home-divider" aria-hidden="true"></span>${shortcutSlot}<a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span><a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#home" aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>${auth.moments?.canWrite === true ? `<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#moments" aria-label="Moments"><img src="/assets/icn_time.svg" alt="" aria-hidden="true"></a>` : ""}${isAdmin ? `<span class="home-divider" aria-hidden="true"></span><a href="#admin/dashboard">관리자</a>` : ""}<span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-logout>로그아웃</button>`
     : giftLoggedIn
       ? `<a href="#books">내 이야기</a><span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-gift-logout>로그아웃</button>`
       : `<a href="#login">로그인</a><span class="home-divider" aria-hidden="true"></span><a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span><a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#home" aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>`;
