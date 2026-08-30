@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>나의 이야기 | My Story</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang&family=KoPub+Batang&family=Reenie+Beanie&family=Rubik:wght@300;400;500&family=Tiny5&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <div id="user-header">
+      <header id="topbar" class="home-header" aria-label="상단 메뉴"></header>
+      <img id="gnb-divider" class="gnb-divider" src="/assets/gnb-divider.svg" alt="" aria-hidden="true" />
+    </div>
+    <div class="gnb-scroll-space" aria-hidden="true"></div>
+    <main id="app" class="app" aria-live="polite"></main>
+    <div id="toast" class="toast" hidden></div>
+    <script src="/node_modules/@supabase/supabase-js/dist/umd/supabase.js"></script>
+    <script type="module" src="./app.js?v=gift-card-renderer-20260829"></script>
+  </body>
+</html>

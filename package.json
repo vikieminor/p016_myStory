@@ -1,0 +1,19 @@
+{
+  "name": "my-story-question-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed:supabase": "node scripts/migrate-sample-data-to-supabase.js",
+    "check": "node --check server.js"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans-kr": "^5.3.0",
+    "@fontsource/tiny5": "^5.3.0",
+    "@noonnu/ko-pub-batang": "^0.1.0",
+    "@supabase/supabase-js": "^2.112.3",
+    "pdfkit": "^0.19.1"
+  }
+}

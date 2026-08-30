@@ -1,0 +1,14 @@
+[
+  {
+    "bookTypeId": 2,
+    "title": "나의 이야기",
+    "sender": "친구, 최은진",
+    "receiver": "친구, 이애련",
+    "introduction": "너를 항상 응원하는 마음을 담아",
+    "status": "published",
+    "createdAt": "2026-07-16T08:11:51.581Z",
+    "updatedAt": "2026-07-16T08:15:07.580Z",
+    "id": 1,
+    "publishedAt": "2026-07-16T08:15:07.580Z"
+  }
+]

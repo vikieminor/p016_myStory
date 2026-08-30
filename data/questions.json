@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "content": "어린 시절 가장 기억나는 일은 무엇인가요?",
+    "questionGroupId": 1,
+    "sortOrder": 1,
+    "isActive": true,
+    "inUse": true,
+    "createdAt": "2026-07-09T00:00:00.000Z",
+    "updatedAt": "2026-07-16T02:18:21.214Z"
+  },
+  {
+    "id": 2,
+    "content": "학교생활 중 가장 즐거웠던 순간은 언제였나요?",
+    "questionGroupId": 2,
+    "sortOrder": 2,
+    "isActive": false,
+    "inUse": false,
+    "createdAt": "2026-07-09T00:00:00.000Z",
+    "updatedAt": "2026-07-16T01:15:17.809Z"
+  },
+  {
+    "id": 3,
+    "content": "가족에게 가장 고마웠던 기억은 무엇인가요?",
+    "questionGroupId": 3,
+    "sortOrder": 3,
+    "isActive": true,
+    "inUse": true,
+    "createdAt": "2026-07-09T00:00:00.000Z",
+    "updatedAt": "2026-07-09T07:48:23.695Z"
+  },
+  {
+    "id": 4,
+    "content": "삶에서 중요하게 지키고 싶은 원칙은 무엇인가요?",
+    "questionGroupId": 8,
+    "sortOrder": 4,
+    "isActive": true,
+    "inUse": false,
+    "createdAt": "2026-07-09T00:00:00.000Z",
+    "updatedAt": "2026-07-09T07:48:27.806Z"
+  },
+  {
+    "id": 6,
+    "content": "벌써 한달 사용량 초과",
+    "questionGroupId": 6,
+    "sortOrder": 5,
+    "isActive": false,
+    "inUse": false,
+    "createdAt": "2026-07-09T07:47:00.139Z",
+    "updatedAt": "2026-07-16T01:15:08.040Z"
+  },
+  {
+    "id": 7,
+    "content": "테스트 6",
+    "questionGroupId": 2,
+    "sortOrder": 6,
+    "isActive": true,
+    "inUse": false,
+    "createdAt": "2026-07-16T01:15:58.539Z",
+    "updatedAt": "2026-07-16T01:15:58.539Z"
+  },
+  {
+    "id": 8,
+    "content": "테스트7",
+    "questionGroupId": 3,
+    "sortOrder": 7,
+    "isActive": false,
+    "inUse": false,
+    "createdAt": "2026-07-16T01:16:16.521Z",
+    "updatedAt": "2026-07-16T01:16:16.521Z"
+  }
+]

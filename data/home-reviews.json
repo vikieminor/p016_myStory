@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "relationship": "구매자 후기",
+    "author": "북촌꾸러미연구소",
+    "body": "나의 이야기 노트를 구매하신 분들의 후기입니다. 아끼는 마음을 전할 수 있어서 좋았습니다",
+    "variant": "intro",
+    "isVisible": true,
+    "sortOrder": 1,
+    "publishedAt": null
+  },
+  {
+    "id": 2,
+    "relationship": "딸이 엄마에게",
+    "author": "최*진",
+    "body": "노트에 있는 ‘나와 부모님'질문을 엄마에게 했더니 눈을 반짝이며 할머니, 할아버지 얘기를 하시더라고요. 그 모습을 보고 많은 감정이 올라왔어요.",
+    "variant": "",
+    "isVisible": true,
+    "sortOrder": 2,
+    "publishedAt": null
+  },
+  {
+    "id": 3,
+    "relationship": "아들이 엄마에게",
+    "author": "김*수",
+    "body": "용돈 드릴 때 함 드려보려고요. 쑥쓰럽기는 하지만 어머니를 마음에 두고 있다는 걸 전하고 싶거든요. 그래서 대화가 좀 늘면 좋겠어요.",
+    "variant": "",
+    "isVisible": true,
+    "sortOrder": 3,
+    "publishedAt": null
+  },
+  {
+    "id": 4,
+    "relationship": "내가 나에게",
+    "author": "오*주",
+    "body": "노트를 보고 부모님에게 선물하면 좋겠다고 생각했는데, 질문들을 보니 나도 써보고 싶다는 생각이 들더라고요. 내 삶도 지금쯤 정리해보고 싶었어요.",
+    "variant": "",
+    "isVisible": true,
+    "sortOrder": 4,
+    "publishedAt": null
+  },
+  {
+    "id": 5,
+    "relationship": "조카가 이모에게",
+    "author": "고*경",
+    "body": "엄마에게 선물했는데 4시간만에 쓰시고 고맙다고 전화가 왔어요. 그리고 이모들에게도 선물하면 좋겠다고 하셔서 바로 선물했어요. 친구들에게는 본인이 사서 선물하겠다고 하시더라고요.",
+    "variant": "",
+    "isVisible": true,
+    "sortOrder": 5,
+    "publishedAt": null
+  },
+  {
+    "id": 6,
+    "relationship": "딸이 아빠에게",
+    "author": "이*희",
+    "body": "아빠를 취향조차 잘 모르겠더라고요. 이 노트를 통해서 아빠를 좀 더 알고 싶어요.",
+    "variant": "",
+    "isVisible": true,
+    "sortOrder": 6,
+    "publishedAt": null
+  },
+  {
+    "id": 7,
+    "relationship": "후배가 선배에게",
+    "author": "신*우",
+    "body": "은퇴한 선배에게 심심할 때 끄적여 보시라고 선물하면 좋을 거 같아요.",
+    "variant": "",
+    "isVisible": true,
+    "sortOrder": 7,
+    "publishedAt": null
+  }
+]

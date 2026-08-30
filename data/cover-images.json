@@ -1,0 +1,12 @@
+[
+  {"id":1,"name":"여성 A","imagePath":"/assets/cover_girl_01.png","column":1,"sortOrder":1,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":2,"name":"여성 B","imagePath":"/assets/cover_girl_02.png","column":1,"sortOrder":2,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":3,"name":"여성 C","imagePath":"/assets/cover_girl_03.png","column":1,"sortOrder":3,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":4,"name":"여성 D","imagePath":"/assets/cover_girl_04.png","column":1,"sortOrder":4,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":5,"name":"여성 E","imagePath":"/assets/cover_girl_05.png","column":1,"sortOrder":5,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":6,"name":"남성 A","imagePath":"/assets/cover_boy_01.png","column":2,"sortOrder":1,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":7,"name":"남성 B","imagePath":"/assets/cover_boy_02.png","column":2,"sortOrder":2,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":8,"name":"남성 C","imagePath":"/assets/cover_boy_03.png","column":2,"sortOrder":3,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":9,"name":"남성 D","imagePath":"/assets/cover_boy_04.png","column":2,"sortOrder":4,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":10,"name":"남성 E","imagePath":"/assets/cover_boy_05.png","column":2,"sortOrder":5,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"}
+]

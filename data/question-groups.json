@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "name": "나와 부모님",
+    "description": "부모님에 대한 기억",
+    "sortOrder": 2,
+    "updatedAt": "2026-07-16T14:46:58.371Z"
+  },
+  {
+    "id": 2,
+    "name": "나의 취향",
+    "description": "취향에 대해",
+    "sortOrder": 1,
+    "updatedAt": "2026-07-16T14:48:19.415Z"
+  },
+  {
+    "id": 3,
+    "name": "가족",
+    "description": "가족과 관계에 대한 질문 그룹",
+    "sortOrder": 3
+  },
+  {
+    "id": 4,
+    "name": "친구",
+    "description": "친구와 추억에 대한 질문 그룹",
+    "sortOrder": 4
+  },
+  {
+    "id": 5,
+    "name": "결혼",
+    "description": "결혼과 동반자에 대한 질문 그룹",
+    "sortOrder": 5
+  },
+  {
+    "id": 6,
+    "name": "직장",
+    "description": "일과 커리어에 대한 질문 그룹",
+    "sortOrder": 6
+  },
+  {
+    "id": 7,
+    "name": "부모",
+    "description": "부모와 자녀 관계에 대한 질문 그룹",
+    "sortOrder": 7
+  },
+  {
+    "id": 8,
+    "name": "인생철학",
+    "description": "삶의 가치관과 철학에 대한 질문 그룹",
+    "sortOrder": 8
+  }
+]

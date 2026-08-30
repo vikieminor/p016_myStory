@@ -1,0 +1,5 @@
+[
+  {"id": 1, "name": "부모님 이야기", "description": "부모님께 전하고 싶은 기억과 마음을 담는 책", "coverImage": "classic", "sortOrder": 1, "isActive": true, "createdAt": "2026-07-16T00:00:00.000Z", "updatedAt": "2026-07-16T00:00:00.000Z"},
+  {"id": 2, "name": "나의 자서전", "description": "나의 삶과 중요한 순간을 기록하는 책", "coverImage": "archive", "sortOrder": 2, "isActive": true, "createdAt": "2026-07-16T00:00:00.000Z", "updatedAt": "2026-07-16T00:00:00.000Z"},
+  {"id": 3, "name": "나의 싱글 라이프", "description": "나답게 살아온 일상을 기록하는 책", "coverImage": "garden", "sortOrder": 3, "isActive": true, "createdAt": "2026-07-16T00:00:00.000Z", "updatedAt": "2026-07-16T00:00:00.000Z"}
+]

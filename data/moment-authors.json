@@ -1,0 +1,8 @@
+[
+  {
+    "id": "local-author",
+    "displayName": "작가명",
+    "role": "author",
+    "isActive": true
+  }
+]

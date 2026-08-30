@@ -1,0 +1,23 @@
+[
+  {"id":"1-1","questionId":1,"bookTypeId":1},
+  {"id":"1-2","questionId":1,"bookTypeId":2},
+  {"id":"1-3","questionId":1,"bookTypeId":3},
+  {"id":"2-1","questionId":2,"bookTypeId":1},
+  {"id":"2-2","questionId":2,"bookTypeId":2},
+  {"id":"2-3","questionId":2,"bookTypeId":3},
+  {"id":"3-1","questionId":3,"bookTypeId":1},
+  {"id":"3-2","questionId":3,"bookTypeId":2},
+  {"id":"3-3","questionId":3,"bookTypeId":3},
+  {"id":"4-1","questionId":4,"bookTypeId":1},
+  {"id":"4-2","questionId":4,"bookTypeId":2},
+  {"id":"4-3","questionId":4,"bookTypeId":3},
+  {"id":"6-1","questionId":6,"bookTypeId":1},
+  {"id":"6-2","questionId":6,"bookTypeId":2},
+  {"id":"6-3","questionId":6,"bookTypeId":3},
+  {"id":"7-1","questionId":7,"bookTypeId":1},
+  {"id":"7-2","questionId":7,"bookTypeId":2},
+  {"id":"7-3","questionId":7,"bookTypeId":3},
+  {"id":"8-1","questionId":8,"bookTypeId":1},
+  {"id":"8-2","questionId":8,"bookTypeId":2},
+  {"id":"8-3","questionId":8,"bookTypeId":3}
+]

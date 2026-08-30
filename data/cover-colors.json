@@ -1,0 +1,9 @@
+[
+  {"id":1,"name":"Cream","colorValue":"#C5A58E","sortOrder":1,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":2,"name":"Rose","colorValue":"#D9B9A7","sortOrder":2,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":3,"name":"Garden","colorValue":"#D7DFAE","sortOrder":3,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":4,"name":"Blue","colorValue":"#B6C8D1","sortOrder":4,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":5,"name":"Sand","colorValue":"#D8D0B9","sortOrder":5,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":6,"name":"Lavender","colorValue":"#C8B5C6","sortOrder":6,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"},
+  {"id":7,"name":"Sage","colorValue":"#AFC5B5","sortOrder":7,"isActive":true,"createdAt":"2026-08-23T00:00:00.000Z","updatedAt":"2026-08-23T00:00:00.000Z"}
+]

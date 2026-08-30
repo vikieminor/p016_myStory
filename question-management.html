@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>질문 관리 | My Story Admin</title>
+    <link rel="stylesheet" href="./design.css" />
+    <style>
+      .question-column {
+        width: 42%;
+      }
+
+      .group-column {
+        width: 18%;
+      }
+
+      .order-column,
+      .status-column,
+      .usage-column {
+        width: 96px;
+      }
+
+      .action-column {
+        width: 160px;
+      }
+
+      .inline-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .status-dot {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .status-dot::before {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--color-text-subtle);
+        content: "";
+      }
+
+      .status-dot.is-active::before {
+        background: var(--color-success);
+      }
+
+      .status-dot.is-inactive::before {
+        background: var(--color-text-subtle);
+      }
+
+      .split-grid {
+        display: grid;
+        grid-template-columns: 1fr 280px;
+        gap: 12px;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .summary-item {
+        padding: 18px;
+      }
+
+      .summary-label {
+        margin: 0 0 6px;
+        color: var(--color-text-subtle);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .summary-value {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 700;
+        line-height: 1.1;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (max-width: 900px) {
+        .split-grid,
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="관리자 메뉴">
+        <a class="brand" href="./#admin/dashboard">My Story Admin</a>
+        <nav class="nav">
+          <a class="nav-item" href="./#admin/dashboard">Dashboard</a>
+          <a class="nav-item is-active" href="./#admin/questions">질문 관리</a>
+          <a class="nav-item" href="./#admin/groups">질문그룹 관리</a>
+          <a class="nav-item" href="./#admin/types">북타입 관리</a>
+          <a class="nav-item" href="./#books">출판 관리</a>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <section class="page">
+          <header class="page-header">
+            <div>
+              <p class="eyebrow">Admin</p>
+              <h1 class="page-title">질문 관리</h1>
+              <p class="page-description">
+                질문 내용, 질문그룹, 정렬순서, 사용 여부를 관리합니다.
+              </p>
+            </div>
+            <button class="button button-primary" type="button" data-open-form>
+              질문 등록
+            </button>
+          </header>
+
+          <section class="summary-grid" aria-label="질문 현황">
+            <div class="panel summary-item">
+              <p class="summary-label">전체 질문</p>
+              <p class="summary-value" id="totalCount">0</p>
+            </div>
+            <div class="panel summary-item">
+              <p class="summary-label">사용 질문</p>
+              <p class="summary-value" id="activeCount">0</p>
+            </div>
+            <div class="panel summary-item">
+              <p class="summary-label">비활성 질문</p>
+              <p class="summary-value" id="inactiveCount">0</p>
+            </div>
+            <div class="panel summary-item">
+              <p class="summary-label">사용 중</p>
+              <p class="summary-value" id="inUseCount">0</p>
+            </div>
+          </section>
+
+          <section class="toolbar" aria-label="검색 및 필터">
+            <div class="split-grid">
+              <div class="search">
+                <input
+                  class="search-input"
+                  id="searchInput"
+                  type="search"
+                  placeholder="질문 내용을 검색하세요"
+                />
+              </div>
+              <select class="field-select" id="groupFilter" aria-label="질문그룹 필터">
+                <option value="all">전체 질문그룹</option>
+              </select>
+            </div>
+            <button class="button button-secondary" type="button" id="resetButton">
+              초기화
+            </button>
+          </section>
+
+          <div class="panel table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="order-column">순서</th>
+                  <th class="question-column">질문 내용</th>
+                  <th class="group-column">질문그룹</th>
+                  <th class="status-column">사용 여부</th>
+                  <th class="usage-column">사용 중</th>
+                  <th class="action-column">관리</th>
+                </tr>
+              </thead>
+              <tbody id="questionRows"></tbody>
+            </table>
+            <div class="empty-state hidden" id="emptyState">
+              <div>
+                <p class="empty-title">표시할 질문이 없습니다.</p>
+                <p class="empty-description">
+                  검색 조건을 변경하거나 새 질문을 등록하세요.
+                </p>
+                <button class="button button-primary" type="button" data-open-form>
+                  질문 등록
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop hidden" id="formModal" role="dialog" aria-modal="true">
+      <form class="modal" id="questionForm">
+        <h2 class="modal-title" id="formTitle">질문 등록</h2>
+        <p class="modal-description">
+          질문 내용과 그룹, 순서, 사용 여부를 입력하세요.
+        </p>
+
+        <div class="form-grid">
+          <label class="field">
+            <span class="field-label">질문 내용</span>
+            <textarea
+              class="field-textarea"
+              id="contentInput"
+              required
+              placeholder="예: 어린 시절 가장 기억나는 일은 무엇인가요?"
+            ></textarea>
+            <span class="field-error hidden" id="contentError">질문 내용을 입력하세요.</span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">질문그룹</span>
+            <select class="field-select" id="groupInput" required></select>
+          </label>
+
+          <label class="field">
+            <span class="field-label">질문 순서</span>
+            <input class="field-input" id="sortOrderInput" type="number" min="1" required />
+          </label>
+
+          <label class="field">
+            <span class="field-label">사용 여부</span>
+            <select class="field-select" id="isActiveInput">
+              <option value="true">사용</option>
+              <option value="false">미사용</option>
+            </select>
+            <span class="field-help">삭제가 어려운 질문은 미사용으로 전환합니다.</span>
+          </label>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 24px">
+          <button class="button button-secondary" type="button" data-close-form>취소</button>
+          <button class="button button-primary" type="submit">저장</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop hidden" id="deleteModal" role="dialog" aria-modal="true">
+      <div class="modal">
+        <h2 class="modal-title">질문 삭제</h2>
+        <p class="modal-description" id="deleteMessage"></p>
+        <div class="alert alert-danger hidden" id="deleteBlocked">
+          사용 중인 질문은 삭제할 수 없습니다. 사용 여부를 미사용으로 변경하세요.
+        </div>
+        <div class="modal-actions" style="margin-top: 24px">
+          <button class="button button-secondary" type="button" data-close-delete>취소</button>
+          <button class="button button-danger" type="button" id="confirmDeleteButton">
+            삭제
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const state = {
+        questions: [],
+        groups: [],
+        stats: {
+          total: 0,
+          active: 0,
+          inactive: 0,
+          inUse: 0,
+        },
+        editingId: null,
+        deletingId: null,
+        search: "",
+        groupId: "all",
+      };
+
+      const elements = {
+        rows: document.querySelector("#questionRows"),
+        emptyState: document.querySelector("#emptyState"),
+        totalCount: document.querySelector("#totalCount"),
+        activeCount: document.querySelector("#activeCount"),
+        inactiveCount: document.querySelector("#inactiveCount"),
+        inUseCount: document.querySelector("#inUseCount"),
+        searchInput: document.querySelector("#searchInput"),
+        groupFilter: document.querySelector("#groupFilter"),
+        resetButton: document.querySelector("#resetButton"),
+        formModal: document.querySelector("#formModal"),
+        form: document.querySelector("#questionForm"),
+        formTitle: document.querySelector("#formTitle"),
+        contentInput: document.querySelector("#contentInput"),
+        contentError: document.querySelector("#contentError"),
+        groupInput: document.querySelector("#groupInput"),
+        sortOrderInput: document.querySelector("#sortOrderInput"),
+        isActiveInput: document.querySelector("#isActiveInput"),
+        deleteModal: document.querySelector("#deleteModal"),
+        deleteMessage: document.querySelector("#deleteMessage"),
+        deleteBlocked: document.querySelector("#deleteBlocked"),
+        confirmDeleteButton: document.querySelector("#confirmDeleteButton"),
+      };
+
+      initialize();
+
+      async function initialize() {
+        bindEvents();
+        await loadGroups();
+        await loadQuestions();
+      }
+
+      function renderGroupOptions() {
+        elements.groupFilter.replaceChildren(new Option("전체 질문그룹", "all"));
+        elements.groupInput.replaceChildren();
+
+        state.groups.forEach((group) => {
+          const filterOption = new Option(group.name, group.id);
+          const formOption = new Option(group.name, group.id);
+          elements.groupFilter.append(filterOption);
+          elements.groupInput.append(formOption);
+        });
+      }
+
+      function bindEvents() {
+        document.querySelectorAll("[data-open-form]").forEach((button) => {
+          button.addEventListener("click", () => openForm());
+        });
+
+        document.querySelectorAll("[data-close-form]").forEach((button) => {
+          button.addEventListener("click", closeForm);
+        });
+
+        document.querySelectorAll("[data-close-delete]").forEach((button) => {
+          button.addEventListener("click", closeDeleteModal);
+        });
+
+        elements.searchInput.addEventListener("input", (event) => {
+          state.search = event.target.value.trim();
+          loadQuestions();
+        });
+
+        elements.groupFilter.addEventListener("change", (event) => {
+          state.groupId = event.target.value;
+          loadQuestions();
+        });
+
+        elements.resetButton.addEventListener("click", () => {
+          state.search = "";
+          state.groupId = "all";
+          elements.searchInput.value = "";
+          elements.groupFilter.value = "all";
+          loadQuestions();
+        });
+
+        elements.form.addEventListener("submit", handleSubmit);
+        elements.confirmDeleteButton.addEventListener("click", deleteQuestion);
+      }
+
+      async function loadGroups() {
+        try {
+          state.groups = await requestJson("/api/question-groups");
+          renderGroupOptions();
+        } catch (error) {
+          showTableMessage(error.message);
+        }
+      }
+
+      async function loadQuestions() {
+        try {
+          const params = new URLSearchParams({
+            search: state.search,
+            groupId: state.groupId,
+          });
+          const data = await requestJson(`/api/questions?${params}`);
+          state.questions = data.items;
+          state.stats = data.stats;
+          render();
+        } catch (error) {
+          showTableMessage(error.message);
+        }
+      }
+
+      function render() {
+        renderSummary();
+        renderRows();
+      }
+
+      function renderSummary() {
+        elements.totalCount.textContent = state.stats.total;
+        elements.activeCount.textContent = state.stats.active;
+        elements.inactiveCount.textContent = state.stats.inactive;
+        elements.inUseCount.textContent = state.stats.inUse;
+      }
+
+      function renderRows() {
+        const questions = state.questions;
+        elements.rows.innerHTML = "";
+        elements.emptyState.classList.toggle("hidden", questions.length > 0);
+
+        questions.forEach((question) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${question.sortOrder}</td>
+            <td>${escapeHtml(question.content)}</td>
+            <td><span class="badge">${escapeHtml(question.questionGroupName)}</span></td>
+            <td>
+              <span class="status-dot ${question.isActive ? "is-active" : "is-inactive"}">
+                ${question.isActive ? "사용" : "미사용"}
+              </span>
+            </td>
+            <td>${question.inUse ? "예" : "아니오"}</td>
+            <td>
+              <div class="inline-actions">
+                <button class="button button-ghost" type="button" data-edit="${question.id}">수정</button>
+                <button class="button button-ghost" type="button" data-toggle="${question.id}">
+                  ${question.isActive ? "비활성" : "활성"}
+                </button>
+                <button class="button button-ghost" type="button" data-delete="${question.id}">삭제</button>
+              </div>
+            </td>
+          `;
+
+          row.querySelector("[data-edit]").addEventListener("click", () => openForm(question.id));
+          row.querySelector("[data-toggle]").addEventListener("click", () => toggleActive(question.id));
+          row.querySelector("[data-delete]").addEventListener("click", () => openDeleteModal(question.id));
+          elements.rows.append(row);
+        });
+      }
+
+      function openForm(id = null) {
+        state.editingId = id;
+        elements.contentError.classList.add("hidden");
+
+        if (id) {
+          const question = findQuestion(id);
+          elements.formTitle.textContent = "질문 수정";
+          elements.contentInput.value = question.content;
+          elements.groupInput.value = String(question.questionGroupId);
+          elements.sortOrderInput.value = question.sortOrder;
+          elements.isActiveInput.value = String(question.isActive);
+        } else {
+          elements.formTitle.textContent = "질문 등록";
+          elements.form.reset();
+          elements.groupInput.value = String(state.groups[0]?.id || "");
+          elements.sortOrderInput.value = getNextSortOrder();
+          elements.isActiveInput.value = "true";
+        }
+
+        elements.formModal.classList.remove("hidden");
+        elements.contentInput.focus();
+      }
+
+      function closeForm() {
+        state.editingId = null;
+        elements.formModal.classList.add("hidden");
+      }
+
+      async function handleSubmit(event) {
+        event.preventDefault();
+
+        const content = elements.contentInput.value.trim();
+        if (!content) {
+          elements.contentError.classList.remove("hidden");
+          elements.contentInput.focus();
+          return;
+        }
+
+        const payload = {
+          content,
+          questionGroupId: Number(elements.groupInput.value),
+          sortOrder: Number(elements.sortOrderInput.value),
+          isActive: elements.isActiveInput.value === "true",
+        };
+
+        try {
+          if (state.editingId) {
+            await requestJson(`/api/questions/${state.editingId}`, {
+              method: "PUT",
+              body: JSON.stringify(payload),
+            });
+          } else {
+            await requestJson("/api/questions", {
+              method: "POST",
+              body: JSON.stringify(payload),
+            });
+          }
+
+          closeForm();
+          await loadQuestions();
+        } catch (error) {
+          elements.contentError.textContent = error.message;
+          elements.contentError.classList.remove("hidden");
+        }
+      }
+
+      async function toggleActive(id) {
+        await requestJson(`/api/questions/${id}/toggle-active`, {
+          method: "PATCH",
+        });
+        await loadQuestions();
+      }
+
+      function openDeleteModal(id) {
+        const question = findQuestion(id);
+        state.deletingId = id;
+        elements.deleteMessage.textContent = `"${question.content}" 질문을 삭제하시겠습니까?`;
+        elements.deleteBlocked.classList.toggle("hidden", !question.inUse);
+        elements.confirmDeleteButton.disabled = question.inUse;
+        elements.confirmDeleteButton.classList.toggle("button-secondary", question.inUse);
+        elements.confirmDeleteButton.classList.toggle("button-danger", !question.inUse);
+        elements.deleteModal.classList.remove("hidden");
+      }
+
+      function closeDeleteModal() {
+        state.deletingId = null;
+        elements.deleteModal.classList.add("hidden");
+      }
+
+      async function deleteQuestion() {
+        const question = findQuestion(state.deletingId);
+        if (!question || question.inUse) return;
+
+        try {
+          await requestJson(`/api/questions/${state.deletingId}`, {
+            method: "DELETE",
+          });
+          closeDeleteModal();
+          await loadQuestions();
+        } catch (error) {
+          elements.deleteBlocked.textContent = error.message;
+          elements.deleteBlocked.classList.remove("hidden");
+        }
+      }
+
+      function findQuestion(id) {
+        return state.questions.find((question) => question.id === id);
+      }
+
+      function getNextSortOrder() {
+        if (state.questions.length === 0) return 1;
+        return Math.max(...state.questions.map((question) => question.sortOrder)) + 1;
+      }
+
+      async function requestJson(url, options = {}) {
+        const response = await fetch(url, {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          ...options,
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "요청을 처리할 수 없습니다.");
+        }
+
+        return data;
+      }
+
+      function showTableMessage(message) {
+        elements.rows.innerHTML = "";
+        elements.emptyState.classList.remove("hidden");
+        elements.emptyState.querySelector(".empty-title").textContent = "데이터를 불러올 수 없습니다.";
+        elements.emptyState.querySelector(".empty-description").textContent = message;
+      }
+
+      function escapeHtml(value) {
+        return value
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+    </script>
+  </body>
+</html>
