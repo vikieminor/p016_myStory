@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import PDFDocument from "pdfkit";
+import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 await loadEnvFile();
@@ -14,6 +15,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
+const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID || "";
+const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET || "";
+const NAVER_REDIRECT_URI = process.env.NAVER_REDIRECT_URI || "";
 const GIFT_CODE_PEPPER = process.env.GIFT_CODE_PEPPER || "";
 const GIFT_SESSION_COOKIE = "gift_session";
 const GIFT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -28,6 +32,9 @@ const DEFAULT_RECIPIENT_MESSAGE = "내 곁에 있어 주셔서 감사합니다.\
 // 원격 DB는 스키마 적용 뒤 명시적으로 활성화한다. 키만 있는 경우에는
 // 기존 data/ 샘플을 계속 보여 주어 빈 원격 DB로 데이터가 사라진 듯 보이지 않게 한다.
 const USE_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_KEY && process.env.USE_SUPABASE === "true");
+const NAVER_STATE_COOKIE = "naver_oauth_state";
+const NAVER_STATE_TTL_SECONDS = 10 * 60;
+const supabaseAdmin = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } }) : null;
 const DATA_DIR = path.join(__dirname, "data");
 const MOMENTS_PDF_TITLE_FONT = path.join(__dirname, "node_modules/@fontsource/tiny5/files/tiny5-latin-400-normal.woff");
 const MOMENTS_PDF_AUTHOR_FONT = path.join(__dirname, "node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff");
@@ -58,6 +65,8 @@ const mimeTypes = { ".html": "text/html; charset=utf-8", ".css": "text/css; char
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    if (req.method === "GET" && url.pathname === "/auth/naver") return void await naverStartRoute(req, res);
+    if (req.method === "GET" && url.pathname === "/auth/naver/callback") return void await naverCallbackRoute(req, res, url);
     if (url.pathname.startsWith("/api/")) return void await handleApi(req, res, url);
     if (url.pathname.startsWith("/print/")) return void await renderBookOutput(req, res, Number(url.pathname.split("/").pop()), true);
     if (url.pathname.startsWith("/preview/")) return void await renderBookOutput(req, res, Number(url.pathname.split("/").pop()), false);
@@ -780,6 +789,74 @@ async function removeCoverImage(imagePath) { if (!USE_SUPABASE || !imagePath || 
 function authConfigRoute(res) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return sendJson(res, 503, { error: "Supabase Auth client 설정이 없습니다." });
   return sendJson(res, 200, { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY });
+}
+
+function requestOrigin(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || (process.env.NODE_ENV === "production" ? "https" : "http");
+  return `${protocol}://${req.headers.host}`;
+}
+function naverRedirectUri(req) { return NAVER_REDIRECT_URI || `${requestOrigin(req)}/auth/naver/callback`; }
+function naverAppRedirectUri(req) { return `${requestOrigin(req)}/`; }
+function naverStateCookie(value, clear = false) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${NAVER_STATE_COOKIE}=${clear ? "" : encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax${secure}${clear ? "; Max-Age=0" : `; Max-Age=${NAVER_STATE_TTL_SECONDS}`}`;
+}
+function redirect(res, location, headers = {}) { res.writeHead(302, { Location: location, ...headers }); res.end(); }
+function naverFailure(res, status, message, clearState = false) {
+  const headers = clearState ? { "Set-Cookie": naverStateCookie("", true) } : {};
+  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", ...headers }); res.end(message);
+}
+function requireNaverConfig() {
+  if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET || !SUPABASE_URL || !SUPABASE_KEY || !supabaseAdmin) throw new Error("네이버 로그인 서버 설정이 없습니다.");
+}
+async function naverStartRoute(req, res) {
+  try {
+    requireNaverConfig();
+    const state = randomBytes(32).toString("base64url");
+    const authorizeUrl = new URL("https://nid.naver.com/oauth2.0/authorize");
+    authorizeUrl.search = new URLSearchParams({ response_type: "code", client_id: NAVER_CLIENT_ID, redirect_uri: naverRedirectUri(req), state }).toString();
+    redirect(res, authorizeUrl.toString(), { "Set-Cookie": naverStateCookie(state) });
+  } catch (error) { naverFailure(res, 503, error.message); }
+}
+async function naverCallbackRoute(req, res, url) {
+  const cookies = parseCookies(req);
+  const savedState = cookies[NAVER_STATE_COOKIE] || "";
+  const callbackState = url.searchParams.get("state") || "";
+  const code = url.searchParams.get("code") || "";
+  if (!savedState || !callbackState || !equalSecret(savedState, callbackState)) return naverFailure(res, 400, "네이버 로그인 요청이 만료되었거나 유효하지 않습니다.", true);
+  if (url.searchParams.get("error") || !code) return naverFailure(res, 400, "네이버 로그인을 완료하지 못했습니다.", true);
+  try {
+    requireNaverConfig();
+    const tokenResponse = await fetch("https://nid.naver.com/oauth2.0/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", client_id: NAVER_CLIENT_ID, client_secret: NAVER_CLIENT_SECRET, code, state: callbackState }) });
+    const tokenData = await tokenResponse.json().catch(() => ({}));
+    if (!tokenResponse.ok || !tokenData.access_token) throw new Error("네이버 access token을 받을 수 없습니다.");
+    const profileResponse = await fetch("https://openapi.naver.com/v1/nid/me", { headers: { Authorization: `Bearer ${tokenData.access_token}` } });
+    const profileData = await profileResponse.json().catch(() => ({}));
+    if (!profileResponse.ok || profileData.resultcode !== "00" || !profileData.response) throw new Error("네이버 사용자 정보를 확인할 수 없습니다.");
+    const profile = profileData.response;
+    const email = normalizeEmail(profile.email);
+    if (!email) throw new Error("네이버 계정 이메일 제공에 동의해야 로그인할 수 있습니다.");
+    const existingUser = await findSupabaseUserByEmail(email);
+    if (!existingUser) {
+      const { data, error } = await supabaseAdmin.auth.admin.createUser({ email, email_confirm: true, user_metadata: { name: String(profile.name || profile.nickname || email).trim() } });
+      if (error && !String(error.message || "").toLowerCase().includes("already")) throw new Error("Supabase 사용자를 생성할 수 없습니다.");
+      if (!data?.user && error) {
+        const racedUser = await findSupabaseUserByEmail(email);
+        if (!racedUser) throw new Error("Supabase 사용자를 확인할 수 없습니다.");
+      }
+    }
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo: naverAppRedirectUri(req) } });
+    if (linkError) throw new Error("Supabase 인증 링크를 생성할 수 없습니다.");
+    const actionLink = linkData?.properties?.action_link;
+    if (!actionLink) throw new Error("Supabase 인증 링크를 받지 못했습니다.");
+    redirect(res, actionLink, { "Set-Cookie": naverStateCookie("", true) });
+  } catch (error) { naverFailure(res, 502, error.message, true); }
+}
+async function findSupabaseUserByEmail(email) {
+  const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (error) throw new Error("Supabase 사용자를 조회할 수 없습니다.");
+  return data.users.find((user) => normalizeEmail(user.email) === email) || null;
 }
 
 async function authMeRoute(req, res) {
