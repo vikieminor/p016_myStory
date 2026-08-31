@@ -1,7 +1,7 @@
 const app = document.querySelector("#app");
 const toast = document.querySelector("#toast");
 const topbar = document.querySelector("#topbar");
-const state = { createType: null, createStep: 1, currentBook: null, currentUserId: null, authKind: null, giftSession: null, autoSave: null, bookWritingFull: false, giftCreateType: null, giftCreateStep: 1, giftDraft: null, giftCover: null, giftResult: null, giftSubmitting: false, giftCopyTimer: null, profileSaved: false, renderId: 0 };
+const state = { createType: null, createStep: 1, currentBook: null, currentUserId: null, authKind: null, giftSession: null, autoSave: null, bookWritingFull: false, giftCreateType: null, giftCreateStep: 1, giftDraft: null, giftCover: null, giftResult: null, giftSubmitting: false, giftCopyTimer: null, profileSaved: false, renderId: 0, writingBooksCache: null, mobileMenuOpen: false, mobileStoryOpen: false };
 const createClient = window.supabase?.createClient;
 let authClient = null;
 let authReady = null;
@@ -260,8 +260,9 @@ async function render() {
     state.currentUserId = auth.session?.user?.id || null;
     state.authKind = auth.authKind || (auth.session ? "account" : null);
     state.giftSession = auth.giftSession || null;
-    renderTopGnb(auth);
-    if (auth.session) refreshShortcutBooks(auth, renderId);
+    const writingBooks = auth.session ? await getWritingBooks(auth) : [];
+    if (renderId !== state.renderId) return;
+    renderTopGnb(auth, writingBooks);
     if (route === "admin" && auth.isAdmin !== true) { location.hash = "#home"; return; }
     if (route === "home") return home();
     if (route === "books") return books();
@@ -282,8 +283,8 @@ async function render() {
 
 function lastBookQuestionKey(userId, bookId) { return `my-story:last-question:${userId}:${bookId}`; }
 function readLastBookQuestion(userId, bookId) { try { return localStorage.getItem(lastBookQuestionKey(userId, bookId)) || ""; } catch { return ""; } }
-function rememberBookQuestion(bookId, questionId) { if (!state.currentUserId || !questionId) return; try { localStorage.setItem(lastBookQuestionKey(state.currentUserId, bookId), String(questionId)); } catch {} }
-async function getShortcutBooks(auth) {
+function rememberBookQuestion(bookId, questionId) { if (!state.currentUserId || !questionId) return; try { localStorage.setItem(lastBookQuestionKey(state.currentUserId, bookId), String(questionId)); } catch {} const cachedBook = state.writingBooksCache?.books?.find((book) => String(book.id) === String(bookId)); if (cachedBook) cachedBook.resumePage = `question-${questionId}`; }
+async function fetchWritingBooks(auth) {
   const books = (await api("/api/books")).filter((book) => book.status === "writing");
   return Promise.all(books.map(async (book) => {
     try {
@@ -291,41 +292,97 @@ async function getShortcutBooks(auth) {
       const questions = detail.outline.groups.flatMap((group) => group.questions);
       const lastQuestionId = readLastBookQuestion(auth.session.user.id, book.id);
       const lastQuestion = questions.find((question) => String(question.id) === String(lastQuestionId)) || questions[0];
-      return { ...book, shortcutPage: lastQuestion ? `question-${lastQuestion.id}` : "" };
-    } catch { return { ...book, shortcutPage: "" }; }
+      return { ...book, resumePage: lastQuestion ? `question-${lastQuestion.id}` : "" };
+    } catch { return { ...book, resumePage: "" }; }
   }));
 }
 
-function shortcutMarkup(writingBooks = []) {
-  if (writingBooks.length === 1) return `<a class="home-shortcut-link" href="#book/${writingBooks[0].id}/${writingBooks[0].shortcutPage}">바로가기</a>`;
-  if (writingBooks.length > 1) return `<details class="home-shortcut-menu"><summary>바로가기</summary><div class="home-shortcut-options">${writingBooks.map((book) => `<a href="#book/${book.id}/${book.shortcutPage}">${escapeHtml(book.title)}</a>`).join("")}</div></details>`;
-  return "";
+async function getWritingBooks(auth) {
+  const userId = auth.session?.user?.id;
+  if (!userId) return [];
+  if (state.writingBooksCache?.userId === userId) {
+    return state.writingBooksCache.promise || state.writingBooksCache.books || [];
+  }
+  const promise = fetchWritingBooks(auth).then((books) => {
+    if (state.writingBooksCache?.userId === userId) state.writingBooksCache.books = books;
+    return books;
+  }).catch(() => {
+    if (state.writingBooksCache?.userId === userId) state.writingBooksCache.books = [];
+    return [];
+  });
+  state.writingBooksCache = { userId, promise, books: [] };
+  return promise;
 }
 
-async function refreshShortcutBooks(auth, renderId) {
-  try {
-    const writingBooks = await getShortcutBooks(auth);
-    if (renderId !== state.renderId || !topbar.querySelector("[data-shortcut-slot]")) return;
-    topbar.querySelector("[data-shortcut-slot]").outerHTML = shortcutMarkup(writingBooks);
-    topbar.querySelectorAll(".home-nav a, .home-nav-action, .home-shortcut-menu summary").forEach((label) => label.classList.add("home-gnb-label"));
-  } catch {}
+function clearWritingBooksCache() {
+  state.writingBooksCache = null;
+}
+
+function closeMobileMenu() {
+  state.mobileMenuOpen = false;
+  state.mobileStoryOpen = false;
+  const panel = topbar.querySelector("[data-mobile-menu-panel]");
+  const toggle = topbar.querySelector("[data-mobile-menu-toggle]");
+  const storyToggle = topbar.querySelector("[data-mobile-story-toggle]");
+  if (panel) panel.hidden = true;
+  if (toggle) { toggle.setAttribute("aria-expanded", "false"); toggle.setAttribute("aria-label", "메뉴 열기"); }
+  if (storyToggle) { storyToggle.setAttribute("aria-expanded", "false"); storyToggle.setAttribute("aria-label", "내 이야기 책 목록 펼치기"); }
+}
+
+function toggleMobileMenu() {
+  const panel = topbar.querySelector("[data-mobile-menu-panel]");
+  const toggle = topbar.querySelector("[data-mobile-menu-toggle]");
+  if (!panel || !toggle) return;
+  if (state.mobileMenuOpen) return closeMobileMenu();
+  state.mobileMenuOpen = !state.mobileMenuOpen;
+  panel.hidden = !state.mobileMenuOpen;
+  toggle.setAttribute("aria-expanded", String(state.mobileMenuOpen));
+  toggle.setAttribute("aria-label", state.mobileMenuOpen ? "메뉴 닫기" : "메뉴 열기");
+}
+
+function toggleMobileStory() {
+  const panel = topbar.querySelector("[data-mobile-story-panel]");
+  const toggle = topbar.querySelector("[data-mobile-story-toggle]");
+  if (!panel || !toggle) return;
+  state.mobileStoryOpen = !state.mobileStoryOpen;
+  panel.hidden = !state.mobileStoryOpen;
+  toggle.setAttribute("aria-expanded", String(state.mobileStoryOpen));
+  toggle.setAttribute("aria-label", state.mobileStoryOpen ? "내 이야기 책 목록 접기" : "내 이야기 책 목록 펼치기");
+}
+
+function handleStoreClick(event) {
+  event.preventDefault();
+  closeMobileMenu();
+  toastMsg("준비중입니다");
 }
 
 function renderTopGnb(auth, writingBooks = []) {
+  state.mobileMenuOpen = false;
+  state.mobileStoryOpen = false;
   const loggedIn = Boolean(auth.session);
   const giftLoggedIn = auth.authKind === "gift" && Boolean(auth.giftSession?.bookId);
   const isAdmin = auth.isAdmin === true;
-  const shortcut = shortcutMarkup(writingBooks);
-  const shortcutMenu = shortcut ? `${shortcut}<span class="home-divider" aria-hidden="true"></span>` : "";
-  const shortcutSlot = writingBooks.length ? shortcutMenu : `<span data-shortcut-slot></span>`;
+  const storyBooks = writingBooks.length
+    ? writingBooks.map((book) => `<a href="#book/${book.id}/${book.resumePage}">${escapeHtml(book.title)}</a>`).join("")
+    : `<span class="home-story-empty">작성 중인 이야기가 없습니다.</span>`;
+  const storyMenu = `<div class="home-story-menu"><a class="home-story-link" href="#books" aria-haspopup="true">내 이야기</a><div class="home-story-popover" role="menu" aria-label="내 이야기 목록">${storyBooks}</div></div>`;
+  const createItem = `<a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a>`;
+  const profileMenu = `<div class="home-profile-menu"><a class="home-profile-link home-icon-link" href="#profile" aria-label="프로필 메뉴" aria-haspopup="true"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a><div class="home-profile-popover" role="menu" aria-label="프로필 메뉴"><a href="#profile" role="menuitem">프로필</a><button class="home-nav-action" data-logout role="menuitem">로그아웃</button></div></div>`;
+  const mobileStoryBooks = writingBooks.length
+    ? `<div class="mobile-story-books" id="mobile-story-books" data-mobile-story-panel role="menu" aria-label="내 이야기 책 목록" hidden>${writingBooks.map((book) => `<a href="#book/${book.id}/${book.resumePage}" data-mobile-menu-item role="menuitem">${escapeHtml(book.title)}</a>`).join("")}</div>`
+    : "";
+  const mobileStoryMenu = `<div class="mobile-story-item"><a href="#books" data-mobile-menu-item>내 이야기</a>${writingBooks.length ? `<button class="mobile-story-toggle" type="button" data-mobile-story-toggle aria-controls="mobile-story-books" aria-expanded="false" aria-label="내 이야기 책 목록 펼치기">⌄</button>` : ""}</div>${mobileStoryBooks}`;
+  const mobileMenu = loggedIn
+    ? `${mobileStoryMenu}<a href="#create" data-mobile-menu-item>새 이야기 만들기</a><a href="#gift-create" data-mobile-menu-item>선물하기</a><a href="#" data-store-link data-mobile-menu-item>스토어</a><a href="#profile" data-mobile-menu-item>계정</a><button type="button" data-logout data-mobile-menu-item>로그아웃</button>`
+    : `<a href="#login" data-mobile-menu-item>로그인</a><a href="#" data-store-link data-mobile-menu-item>스토어</a>`;
   const menu = loggedIn
-    ? `<a href="#books">내 이야기</a><span class="home-divider" aria-hidden="true"></span><a href="#profile">${escapeHtml(auth.user?.displayName || "사용자")}</a><span class="home-divider" aria-hidden="true"></span>${shortcutSlot}<a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span><a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#home" aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>${auth.moments?.canWrite === true ? `<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#moments" aria-label="Moments"><img src="/assets/icn_time.svg" alt="" aria-hidden="true"></a>` : ""}${isAdmin ? `<span class="home-divider" aria-hidden="true"></span><a href="#admin/dashboard">관리자</a>` : ""}<span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-logout>로그아웃</button>`
+    ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span>${createItem}<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>${auth.moments?.canWrite === true ? `<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#moments" aria-label="Moments"><img src="/assets/icn_time.svg" alt="" aria-hidden="true"></a>` : ""}${isAdmin ? `<span class="home-divider" aria-hidden="true"></span><a href="#admin/dashboard">관리자</a>` : ""}<span class="home-divider" aria-hidden="true"></span>${profileMenu}`
     : giftLoggedIn
-      ? `<a href="#books">내 이야기</a><span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-gift-logout>로그아웃</button>`
-      : `<a href="#login">로그인</a><span class="home-divider" aria-hidden="true"></span><a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span><a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#home" aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>`;
-  topbar.innerHTML = `<a class="home-logo" href="#home">북촌꾸러미연구소</a><nav class="home-nav" aria-label="홈 메뉴">${menu}</nav>`; console.debug("[My Story] GNB rendered", { logoutButton: Boolean(topbar.querySelector("[data-logout]")), logoutButtonHtml: topbar.querySelector("[data-logout]")?.outerHTML || null, loggedIn, isAdmin });
+      ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-gift-logout>로그아웃</button>`
+      : `<a href="#login">로그인</a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>`;
+  topbar.innerHTML = `<a class="home-logo" href="#home">북촌꾸러미연구소</a><nav class="home-nav" aria-label="홈 메뉴">${menu}</nav><button class="mobile-menu-toggle" type="button" data-mobile-menu-toggle aria-label="메뉴 열기" aria-controls="mobile-gnb-menu" aria-expanded="false"><img src="/assets/m_icn_menu.svg" alt="" aria-hidden="true"></button><div class="mobile-menu-panel" id="mobile-gnb-menu" data-mobile-menu-panel role="menu" aria-label="모바일 메뉴" hidden>${mobileMenu}</div>`; console.debug("[My Story] GNB rendered", { logoutButton: Boolean(topbar.querySelector("[data-logout]")), logoutButtonHtml: topbar.querySelector("[data-logout]")?.outerHTML || null, loggedIn, isAdmin });
   topbar.querySelectorAll(".home-divider").forEach((divider) => divider.remove());
-  topbar.querySelectorAll(".home-nav a, .home-nav-action, .home-shortcut-menu summary").forEach((label) => label.classList.add("home-gnb-label"));
+  topbar.querySelectorAll(".home-nav a, .home-nav-action").forEach((label) => label.classList.add("home-gnb-label"));
 }
 
 async function home() {
@@ -694,7 +751,12 @@ async function openProtectedBookOutput(bookId, print = false, outputWindow = nul
 async function onClick(e) {
   const bannerPane = e.target.closest("[data-banner-link]");
   if (bannerPane) { window.location.href = bannerPane.dataset.bannerLink; return; }
-  const el = e.target.closest("[data-go],[data-pick-type],[data-next-create],[data-create-back],[data-create-confirm],[data-gift-pick-type],[data-gift-next],[data-gift-back],[data-gift-create],[data-copy-gift-code],[data-open-book-output],[data-gift-logout],[data-save-answer],[data-save-inline-answer],[data-book-page],[data-notewindow-toggle],[data-publish-book],[data-save-cover],[data-delete-publication],[data-delete-book],[data-open-book-delete],[data-confirm-book-delete],[data-open-book-info],[data-confirm-book-info],[data-open-form],[data-question-list-type],[data-edit-question],[data-edit-group],[data-edit-type],[data-edit-cover-color],[data-edit-cover-image],[data-edit-review],[data-edit-moment],[data-edit-banner],[data-google-login],[data-kakao-login],[data-naver-login],[data-logout],[data-author-edit],[data-author-cancel-edit],[data-toggle-question],[data-toggle-review],[data-toggle-moment],[data-toggle-moment-author],[data-save-moment-author],[data-delete-question],[data-delete-group],[data-delete-type],[data-delete-cover-color],[data-delete-cover-image],[data-delete-review],[data-delete-moment],[data-delete-banner],[data-close-modal]"); if (!el) return;
+  if (state.mobileMenuOpen && !e.target.closest("#topbar [data-mobile-menu-panel], #topbar [data-mobile-menu-toggle]")) closeMobileMenu();
+  const el = e.target.closest("[data-go],[data-pick-type],[data-next-create],[data-create-back],[data-create-confirm],[data-gift-pick-type],[data-gift-next],[data-gift-back],[data-gift-create],[data-copy-gift-code],[data-open-book-output],[data-gift-logout],[data-save-answer],[data-save-inline-answer],[data-book-page],[data-notewindow-toggle],[data-publish-book],[data-save-cover],[data-delete-publication],[data-delete-book],[data-open-book-delete],[data-confirm-book-delete],[data-open-book-info],[data-confirm-book-info],[data-open-form],[data-question-list-type],[data-edit-question],[data-edit-group],[data-edit-type],[data-edit-cover-color],[data-edit-cover-image],[data-edit-review],[data-edit-moment],[data-edit-banner],[data-google-login],[data-kakao-login],[data-naver-login],[data-logout],[data-store-link],[data-mobile-menu-toggle],[data-mobile-story-toggle],[data-mobile-menu-item],[data-author-edit],[data-author-cancel-edit],[data-toggle-question],[data-toggle-review],[data-toggle-moment],[data-toggle-moment-author],[data-save-moment-author],[data-delete-question],[data-delete-group],[data-delete-type],[data-delete-cover-color],[data-delete-cover-image],[data-delete-review],[data-delete-moment],[data-delete-banner],[data-close-modal]"); if (!el) return;
+  if (el.dataset.mobileMenuToggle !== undefined) return toggleMobileMenu();
+  if (el.dataset.mobileStoryToggle !== undefined) return toggleMobileStory();
+  if (el.dataset.storeLink !== undefined) return handleStoreClick(e);
+  if (el.dataset.mobileMenuItem !== undefined) closeMobileMenu();
   if (el.dataset.giftPickType) { state.giftCreateType = Number(el.dataset.giftPickType); state.giftCreateStep = 2; return giftCreate(); }
   if (el.dataset.giftNext) { if (!state.giftCreateType) return toastMsg("북타입을 선택하세요."); state.giftCreateStep = Number(el.dataset.giftNext) + 1; return giftCreate(); }
   if ("giftBack" in el.dataset) { captureGiftCover(); state.giftCreateStep = Math.max(1, state.giftCreateStep - 1); return giftCreate(); }
@@ -709,7 +771,7 @@ async function onClick(e) {
   if (el.dataset.pickType) { state.createType = Number(el.dataset.pickType); state.createStep = 2; create(); }
   if ("nextCreate" in el.dataset) { state.createStep++; create(); }
   if ("createBack" in el.dataset) { state.createStep--; create(); }
-  if ("createConfirm" in el.dataset) { const created = await api("/api/books", { method: "POST", body: { bookTypeId: state.createType, ...state.bookDraft } }); state.createStep = 1; state.createType = null; state.bookDraft = null; toastMsg("책과 질문 목차를 만들었습니다."); location.hash = `#book/${created.id}`; }
+  if ("createConfirm" in el.dataset) { const created = await api("/api/books", { method: "POST", body: { bookTypeId: state.createType, ...state.bookDraft } }); clearWritingBooksCache(); state.createStep = 1; state.createType = null; state.bookDraft = null; toastMsg("책과 질문 목차를 만들었습니다."); location.hash = `#book/${created.id}`; }
   if (el.dataset.saveAnswer) { const [, bookId, pageParam] = location.hash.slice(1).split("/"); await saveAnswer(Number(bookId), pageQuestionId(pageParam), el.dataset.saveAnswer === "final"); }
   if (el.dataset.bookPage) { const [, bookId] = location.hash.slice(1).split("/"); location.hash = `#book/${bookId}/${el.dataset.bookPage}`; return; }
   if ("notewindowToggle" in el.dataset) { state.bookWritingFull = !state.bookWritingFull; document.body.classList.toggle("book-writing-full-route", state.bookWritingFull); const page = el.closest(".book-detail-page"); page?.classList.toggle("book-writing-full", state.bookWritingFull); const image = el.querySelector("img"); if (image) image.src = `/assets/${state.bookWritingFull ? "notewindow_dashboard.svg" : "notewindow_full.svg"}`; el.setAttribute("aria-label", state.bookWritingFull ? "전체보기" : "작성영역만 보기"); el.setAttribute("aria-pressed", String(state.bookWritingFull)); if (state.bookWritingFull) requestAnimationFrame(() => window.scrollTo(0, 0)); }
@@ -740,17 +802,17 @@ async function onClick(e) {
   }
   if (el.dataset.paperBook) toastMsg("종이책 출판 의뢰 기능을 준비하고 있습니다.");
   if (el.dataset.deletePublication) { if (!confirm("출판물을 삭제하시겠습니까? 책과 작성한 답변은 유지되며, 다시 출판할 수 있습니다.")) return; try { await api(`/api/books/${el.dataset.deletePublication}/publish`, { method:"DELETE" }); toastMsg("출판물을 삭제했습니다."); render(); } catch (error) { toastMsg(error.message); } }
-  if (el.dataset.deleteBook) { if (!confirm("이 책과 작성한 모든 답변, 출판물이 영구 삭제됩니다. 계속하시겠습니까?")) return; try { await api(`/api/books/${el.dataset.deleteBook}`, { method:"DELETE" }); toastMsg("책을 삭제했습니다."); render(); } catch (error) { toastMsg(error.message); } }
+  if (el.dataset.deleteBook) { if (!confirm("이 책과 작성한 모든 답변, 출판물이 영구 삭제됩니다. 계속하시겠습니까?")) return; try { await api(`/api/books/${el.dataset.deleteBook}`, { method:"DELETE" }); clearWritingBooksCache(); toastMsg("책을 삭제했습니다."); render(); } catch (error) { toastMsg(error.message); } }
   if (el.dataset.openBookDelete) openBookDeleteModal(el.dataset.openBookDelete);
   if (el.dataset.openBookInfo) openBookInfoModal(el.dataset.openBookInfo);
   if (el.dataset.confirmBookInfo) { const bookId = Number(el.dataset.confirmBookInfo); const [, , pageParam] = location.hash.slice(1).split("/"); const page = pageParam?.startsWith("group-") ? { type: "group", groupId: Number(pageParam.slice(6)) } : pageParam ? { type: "question", questionId: pageQuestionId(pageParam) } : null; try { const form = el.closest("form"); const data = Object.fromEntries(new FormData(form)); await api(`/api/books/${bookId}`, { method: "PUT", body: { title: data.title, sender: data.sender, receiver: data.receiver, introduction: data.introduction } }); document.querySelector(".modal")?.remove(); toastMsg("기본정보를 저장했습니다."); clearInterval(state.autoSave); state.autoSave = null; await book(bookId, page); } catch (error) { toastMsg(error.message); } }
-  if (el.dataset.confirmBookDelete) { try { await api(`/api/books/${el.dataset.confirmBookDelete}`, { method:"DELETE" }); document.querySelector(".modal")?.remove(); toastMsg("책을 삭제했습니다."); location.hash = "#books"; } catch (error) { toastMsg(error.message); } }
+  if (el.dataset.confirmBookDelete) { try { await api(`/api/books/${el.dataset.confirmBookDelete}`, { method:"DELETE" }); clearWritingBooksCache(); document.querySelector(".modal")?.remove(); toastMsg("책을 삭제했습니다."); location.hash = "#books"; } catch (error) { toastMsg(error.message); } }
   if (el.dataset.openForm) openForm(el.dataset.openForm, el.dataset.coverColumn);
   if (el.dataset.questionListType) return openBookTypeQuestionList(el.dataset.questionListType);
   if (el.hasAttribute("data-google-login")) { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${location.origin}/` } }); if (error) toastMsg(error.message); }
   if (el.hasAttribute("data-kakao-login")) { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithOAuth({ provider: "kakao", options: { redirectTo: `${location.origin}/` } }); if (error) toastMsg(error.message); }
   if (el.hasAttribute("data-naver-login")) { window.location.href = "/auth/naver"; return; }
-  if ("logout" in el.dataset) { console.debug("[My Story] logout click received", { target: el.outerHTML, currentHash: location.hash }); try { const client = await ensureAuthClient(); console.debug("[My Story] calling Supabase signOut"); const result = await client.auth.signOut(); console.debug("[My Story] signOut result", { error: result.error?.message || null, dataHasSession: Boolean(result.data?.session) }); if (result.error) throw result.error; const sessionAfterSignOut = await getAuthSession(); console.debug("[My Story] session after signOut", { sessionExists: Boolean(sessionAfterSignOut) }); state.authorEditingId = null; if (location.hash === "#home" || location.hash === "") { console.debug("[My Story] rendering logged-out UI"); return render(); } console.debug("[My Story] routing to #home for logged-out UI"); location.hash = "#home"; } catch (error) { console.error("[My Story] logout failed", { name: error.name, message: error.message }); toastMsg(`로그아웃에 실패했습니다: ${error.message}`); } return; }
+  if ("logout" in el.dataset) { console.debug("[My Story] logout click received", { target: el.outerHTML, currentHash: location.hash }); try { const client = await ensureAuthClient(); console.debug("[My Story] calling Supabase signOut"); const result = await client.auth.signOut(); console.debug("[My Story] signOut result", { error: result.error?.message || null, dataHasSession: Boolean(result.data?.session) }); if (result.error) throw result.error; const sessionAfterSignOut = await getAuthSession(); console.debug("[My Story] session after signOut", { sessionExists: Boolean(sessionAfterSignOut) }); clearWritingBooksCache(); state.authorEditingId = null; if (location.hash === "#home" || location.hash === "") { console.debug("[My Story] rendering logged-out UI"); return render(); } console.debug("[My Story] routing to #home for logged-out UI"); location.hash = "#home"; } catch (error) { console.error("[My Story] logout failed", { name: error.name, message: error.message }); toastMsg(`로그아웃에 실패했습니다: ${error.message}`); } return; }
   if (el.dataset.authorEdit) { state.authorEditingId = Number(el.dataset.authorEdit); return moments(); }
   if ("authorCancelEdit" in el.dataset) { state.authorEditingId = null; return moments(); }
   if (el.dataset.editQuestion) openEdit("question", el.dataset.editQuestion); if (el.dataset.editGroup) openEdit("group", el.dataset.editGroup); if (el.dataset.editType) openEdit("type", el.dataset.editType); if (el.dataset.editCoverColor) openEdit("cover-color", el.dataset.editCoverColor); if (el.dataset.editCoverImage) openEdit("cover-image", el.dataset.editCoverImage); if (el.dataset.editReview) openEdit("review", el.dataset.editReview); if (el.dataset.editMoment) openEdit("moment", el.dataset.editMoment); if (el.dataset.editBanner) openEdit("banner", decodeURIComponent(el.dataset.editBanner));
