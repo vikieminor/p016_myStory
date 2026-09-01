@@ -15,11 +15,10 @@ const homeData = {
     badge: "나의 이야기 질문노트",
     descriptionLines: [
       "이 노트는 ‘거창하게 말해서 미리 써보는 자서전’입니다.",
-      "노트에는 6개의 카테고리로 구성된 질문이 있습니다.",
       "지금쯤 기록을 남길때가 됐다면 이 질문이 도움이 될거에요.",
     ],
     handwriting: {
-      title: "① 책 형태의 노트에 손글씨로 기록하기",
+      title: "질문 노트에 손글씨로 기록하기",
       images: [
         { src: "/assets/home-note-first.png", alt: "나의 이야기 질문노트 표지" },
         { src: "/assets/home-note-second.png", alt: "나의 이야기 질문노트 카테고리" },
@@ -361,6 +360,7 @@ function renderTopGnb(auth, writingBooks = []) {
   state.mobileStoryOpen = false;
   const loggedIn = Boolean(auth.session);
   const giftLoggedIn = auth.authKind === "gift" && Boolean(auth.giftSession?.bookId);
+  const mobileLoggedOut = !loggedIn && !giftLoggedIn;
   const isAdmin = auth.isAdmin === true;
   const storyBooks = writingBooks.length
     ? writingBooks.map((book) => `<a href="#book/${book.id}/${book.resumePage}">${escapeHtml(book.title)}</a>`).join("")
@@ -380,7 +380,9 @@ function renderTopGnb(auth, writingBooks = []) {
     : giftLoggedIn
       ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-gift-logout>로그아웃</button>`
       : `<a href="#login">로그인</a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>`;
-  topbar.innerHTML = `<a class="home-logo" href="#home">북촌꾸러미연구소</a><nav class="home-nav" aria-label="홈 메뉴">${menu}</nav><button class="mobile-menu-toggle" type="button" data-mobile-menu-toggle aria-label="메뉴 열기" aria-controls="mobile-gnb-menu" aria-expanded="false"><img src="/assets/m_icn_menu.svg" alt="" aria-hidden="true"></button><div class="mobile-menu-panel" id="mobile-gnb-menu" data-mobile-menu-panel role="menu" aria-label="모바일 메뉴" hidden>${mobileMenu}</div>`; console.debug("[My Story] GNB rendered", { logoutButton: Boolean(topbar.querySelector("[data-logout]")), logoutButtonHtml: topbar.querySelector("[data-logout]")?.outerHTML || null, loggedIn, isAdmin });
+  const mobileProfileLink = mobileLoggedOut ? `<a class="mobile-profile-link" href="#login" aria-label="로그인"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a>` : "";
+  const mobileStoreLink = mobileLoggedOut ? `<a class="mobile-store-link home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>` : "";
+  topbar.innerHTML = `<a class="home-logo" href="#home">북촌꾸러미연구소</a><nav class="home-nav" aria-label="홈 메뉴">${menu}</nav>${mobileProfileLink}${mobileStoreLink}<button class="mobile-menu-toggle${mobileLoggedOut ? " mobile-menu-toggle-logged-out" : ""}" type="button" data-mobile-menu-toggle aria-label="메뉴 열기" aria-controls="mobile-gnb-menu" aria-expanded="false"><img src="/assets/m_icn_menu.svg" alt="" aria-hidden="true"></button><div class="mobile-menu-panel" id="mobile-gnb-menu" data-mobile-menu-panel role="menu" aria-label="모바일 메뉴" hidden>${mobileMenu}</div>`; console.debug("[My Story] GNB rendered", { logoutButton: Boolean(topbar.querySelector("[data-logout]")), logoutButtonHtml: topbar.querySelector("[data-logout]")?.outerHTML || null, loggedIn, isAdmin });
   topbar.querySelectorAll(".home-divider").forEach((divider) => divider.remove());
   topbar.querySelectorAll(".home-nav a, .home-nav-action").forEach((label) => label.classList.add("home-gnb-label"));
 }
@@ -402,7 +404,97 @@ async function home() {
   const writingCards = onlineWriting.cards.map((card) => `<article class="home-writing-card"><div class="home-writing-card-heading"><span>${card.number}</span><strong>${card.title}</strong></div><p>${card.description}</p></article>`).join("");
   const reviewCards = (homeContent.reviews || []).map((review) => `<article class="home-review-card ${review.variant === "intro" ? "home-review-card-intro" : ""}"><h3>${review.relationship}</h3><p class="home-review-author">${review.author}</p><p class="home-review-body">${review.body}</p></article>`).join("");
 
-app.innerHTML = `<div class="home-page" data-node-id="2097:288"><main class="home-main"><section class="home-banner" data-node-id="2109:357"><div class="home-banner-pane home-banner-left"><img src="${banner.left.src}" alt="${banner.left.alt}"><span class="home-caption">${banner.left.caption}</span></div><div class="home-banner-pane home-banner-right"><img src="${banner.right.src}" alt="${banner.right.alt}"><span class="home-caption">${banner.right.caption}</span></div></section><section class="home-moments" data-node-id="2119:398"><div class="home-moments-inner"><div class="home-moment-meta"><span class="home-moment-time">${moments.time}</span><span class="home-moment-date">${moments.date}</span></div><div class="home-moment-content"><p>${moments.body}</p><div class="home-moment-footer"><span>${moments.author}</span><a href="${momentsUrl}">${moments.more}</a></div></div></div></section><div class="home-note-area"><section class="home-note" data-node-id="2310:192"><div class="home-note-inner"><section class="home-note-description" data-node-id="2143:287"><span class="home-note-badge">${note.badge}</span><p>${note.descriptionLines.map((line) => `<span>${line}</span>`).join("")}</p></section><section class="home-note-paper" data-node-id="2214:392"><img class="home-note-divider" src="/assets/home-note-divider.svg" alt="" aria-hidden="true"><div class="home-note-paper-title-row"><h2>${note.handwriting.title}</h2><a class="home-note-purchase" href="${note.handwriting.buttonUrl}">${note.handwriting.buttonLabel}</a></div><div class="home-note-paper-images">${note.handwriting.images.map((image) => `<div class="home-note-image-frame"><img class="home-note-paper-image" src="${image.src}" alt="${image.alt}"></div>`).join("")}</div></section></div></section><section class="home-recommendation" data-node-id="2324:201"><div class="home-recommendation-inner"><div class="home-doctor" data-node-id="2267:260"><p class="home-recommendation-heading">${recommendation.heading}</p><p class="home-recommendation-body">${recommendation.body}</p><p class="home-recommendation-author">${recommendation.author}</p></div><aside class="home-for-you" data-node-id="2324:160"><h2>${recommendation.forYouHeading}</h2><ul>${forYou}</ul></aside></div></section><section class="home-online-writing" data-node-id="2175:293"><img class="home-online-divider" src="/assets/home-online-divider.svg" alt="" aria-hidden="true"><div class="home-online-title-row"><h2>${onlineWriting.title}</h2><a class="home-online-button" href="${onlineWriting.buttonUrl}">${onlineWriting.buttonLabel}</a></div><div class="home-writing-cards" data-node-id="2214:409">${writingCards}</div></section></div><section class="home-review" data-node-id="2377:1765"><div class="home-review-background" aria-hidden="true"></div><div class="home-review-container" data-node-id="2345:216"><div class="home-review-track" data-node-id="2377:1765">${reviewCards}</div></div></section></main></div>`;
+app.innerHTML = `<div class="home-page" data-node-id="2097:288"><main class="home-main"><section class="home-banner" data-node-id="2109:357"><div class="home-banner-pane home-banner-left"><img src="${banner.left.src}" alt="${banner.left.alt}"><span class="home-caption">${banner.left.caption}</span></div><div class="home-banner-pane home-banner-right"><img src="${banner.right.src}" alt="${banner.right.alt}"><span class="home-caption">${banner.right.caption}</span></div></section><section class="home-moments" data-node-id="2119:398"><div class="home-moments-inner"><div class="home-moment-meta"><span class="home-moment-label">우리가 좋아하는 시간</span><span class="home-moment-time">${moments.time}</span><span class="home-moment-date">${moments.date}</span></div><div class="home-moment-content"><p>${moments.body}</p><div class="home-moment-footer"><span>${moments.author}</span><a href="${momentsUrl}">${moments.more}</a></div></div></div></section><div class="home-note-area"><section class="home-note" data-node-id="2310:192"><div class="home-note-inner"><section class="home-note-description" data-node-id="2143:287"><span class="home-note-badge">${note.badge}</span><p>${note.descriptionLines.map((line) => `<span>${line}</span>`).join("")}</p></section><section class="home-note-paper" data-node-id="2214:392"><img class="home-note-divider" src="/assets/home-note-divider.svg" alt="" aria-hidden="true"><div class="home-note-paper-title-row"><h2>${note.handwriting.title}</h2><a class="home-note-purchase" href="${note.handwriting.buttonUrl}">${note.handwriting.buttonLabel}</a></div><div class="home-note-paper-images">${note.handwriting.images.map((image) => `<div class="home-note-image-frame"><img class="home-note-paper-image" src="${image.src}" alt="${image.alt}"></div>`).join("")}</div></section></div></section><section class="home-recommendation" data-node-id="2324:201"><div class="home-recommendation-inner"><div class="home-doctor" data-node-id="2267:260"><p class="home-recommendation-heading">${recommendation.heading}</p><p class="home-recommendation-body">${recommendation.body}</p><p class="home-recommendation-author">${recommendation.author}</p></div><aside class="home-for-you" data-node-id="2324:160"><h2>${recommendation.forYouHeading}</h2><ul>${forYou}</ul></aside></div></section><section class="home-online-writing" data-node-id="2175:293"><img class="home-online-divider" src="/assets/home-online-divider.svg" alt="" aria-hidden="true"><div class="home-online-title-row"><h2>${onlineWriting.title}</h2><a class="home-online-button" href="${onlineWriting.buttonUrl}">${onlineWriting.buttonLabel}</a></div><div class="home-writing-cards" data-node-id="2214:409">${writingCards}</div></section></div><section class="home-review" data-node-id="2377:1765"><div class="home-review-background" aria-hidden="true"></div><div class="home-review-container" data-node-id="2345:216"><div class="home-review-track" data-node-id="2377:1765">${reviewCards}</div></div></section></main></div>`;
+  document.querySelectorAll(".home-note-description p > span").forEach((line) => {
+    if (!line.textContent.trim()) line.remove();
+  });
+  const notePaper = document.querySelector(".home-note-paper");
+  const noteTitleRow = notePaper?.querySelector(".home-note-paper-title-row");
+  if (noteTitleRow) {
+    const title = noteTitleRow.querySelector("h2");
+    if (title) {
+      const desktopTitle = title.textContent;
+      title.innerHTML = `<span class="home-note-title-desktop">${desktopTitle}</span><span class="home-note-title-mobile">질문 노트에 손글씨로 기록하기</span>`;
+      title.insertAdjacentHTML("beforebegin", `<img class="home-note-step-number" src="/assets/num_1.svg" alt="01">`);
+      const stepNumber = title.previousElementSibling;
+      const titleGroup = document.createElement("div");
+      titleGroup.className = "home-note-title-group";
+      stepNumber?.before(titleGroup);
+      titleGroup.append(stepNumber, title);
+    }
+    noteTitleRow.insertAdjacentHTML("afterend", `<img class="home-note-divider home-note-divider-second" src="/assets/home-note-divider.svg" alt="" aria-hidden="true">`);
+  }
+  if (notePaper) {
+    const purchaseButton = notePaper.querySelector(".home-note-purchase");
+    if (purchaseButton && !purchaseButton.querySelector(".home-note-purchase-label-desktop")) {
+      const desktopLabel = document.createElement("span");
+      desktopLabel.className = "home-note-purchase-label-desktop";
+      desktopLabel.textContent = purchaseButton.textContent;
+      const mobileLabel = document.createElement("span");
+      mobileLabel.className = "home-note-purchase-label-mobile";
+      mobileLabel.textContent = "구매하기";
+      purchaseButton.replaceChildren(desktopLabel, mobileLabel);
+    }
+    const mobileBanners = document.createElement("div");
+    mobileBanners.className = "home-note-mobile-banners";
+    ["m_notebanner_01.png", "m_notebanner_02.png", "m_notebanner_03.png"].forEach((asset, index) => {
+      mobileBanners.insertAdjacentHTML("beforeend", `<div class="home-note-mobile-banner"><img src="/assets/${asset}" alt="질문 노트 배너 ${index + 1}"></div>`);
+    });
+    const existingImages = notePaper.querySelector(".home-note-paper-images");
+    existingImages?.before(mobileBanners);
+  }
+  const onlineWritingSection = document.querySelector(".home-online-writing");
+  const onlineTitleRow = onlineWritingSection?.querySelector(".home-online-title-row");
+  if (onlineTitleRow) {
+    const title = onlineTitleRow.querySelector("h2");
+    if (title && !title.querySelector(".home-online-title-mobile")) {
+      const desktopTitle = title.textContent;
+      title.innerHTML = `<span class="home-online-title-desktop">${desktopTitle}</span><span class="home-online-title-mobile">웹에서 편하게 기록하기</span>`;
+      title.insertAdjacentHTML("beforebegin", `<img class="home-online-step-number" src="/assets/num_2.svg" alt="02">`);
+      const stepNumber = title.previousElementSibling;
+      const titleGroup = document.createElement("div");
+      titleGroup.className = "home-online-title-group";
+      stepNumber?.before(titleGroup);
+      titleGroup.append(stepNumber, title);
+      onlineTitleRow.insertAdjacentHTML("afterend", `<img class="home-online-divider-second" src="/assets/home-online-divider.svg" alt="" aria-hidden="true">`);
+    }
+    const button = onlineTitleRow.querySelector(".home-online-button");
+    if (button && !button.querySelector(".home-online-button-label-mobile")) {
+      const desktopLabel = document.createElement("span");
+      desktopLabel.className = "home-online-button-label-desktop";
+      desktopLabel.textContent = button.textContent;
+      const mobileLabel = document.createElement("span");
+      mobileLabel.className = "home-online-button-label-mobile";
+      mobileLabel.textContent = "시작하기";
+      button.replaceChildren(desktopLabel, mobileLabel);
+    }
+  }
+  const homeMain = document.querySelector(".home-main");
+  const recommendationSection = homeMain?.querySelector(".home-recommendation");
+  const recommendationInner = recommendationSection?.querySelector(".home-recommendation-inner");
+  const forYouSection = recommendationInner?.querySelector(".home-for-you");
+  const onlineSection = homeMain?.querySelector(".home-online-writing");
+  const reviewSection = homeMain?.querySelector(".home-review");
+  const createDivider = document.createElement("img");
+  createDivider.className = "home-mobile-create-divider";
+  createDivider.src = "/assets/create-divider.svg";
+  createDivider.alt = "";
+  createDivider.setAttribute("aria-hidden", "true");
+  const syncMobileHomeOrder = () => {
+    if (!homeMain || !recommendationSection || !recommendationInner || !forYouSection || !onlineSection || !reviewSection) return;
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      recommendationSection.after(onlineSection);
+      onlineSection.after(recommendationSection);
+      onlineSection.after(createDivider);
+      createDivider.after(recommendationSection);
+      reviewSection.before(forYouSection);
+    } else {
+      createDivider.remove();
+      recommendationInner.append(forYouSection);
+      recommendationSection.after(onlineSection);
+    }
+  };
+  syncMobileHomeOrder();
   setHomeBannerLinks(leftBanner, rightBanner);
 }
 
