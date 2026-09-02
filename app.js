@@ -56,6 +56,48 @@ const homeData = {
 
 window.addEventListener("hashchange", render);
 document.addEventListener("click", onClick);
+let writingSwipeStart = null;
+let writingMouseSwipeStart = null;
+function handleWritingSwipe(start, endX, endY) {
+  if (!start || !window.matchMedia("(max-width: 760px)").matches || state.bookWritingFull || !document.body.classList.contains("book-detail-route") || !start.panel.isConnected) return;
+  const dx = endX - start.x;
+  const dy = endY - start.y;
+  if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy)) return;
+  const link = start.panel.querySelector(dx < 0 ? ".book-writing-navigation a:last-of-type" : ".book-writing-navigation a:first-of-type");
+  if (link) link.click();
+}
+document.addEventListener("touchstart", (event) => {
+  if (!window.matchMedia("(max-width: 760px)").matches || state.bookWritingFull || !document.body.classList.contains("book-detail-route")) return;
+  const touch = event.touches[0];
+  const panel = event.target.closest(".book-writing-panel");
+  if (!touch || !panel || event.target.closest("textarea,input,select,button,a,[contenteditable=\"true\"]")) return;
+  writingSwipeStart = { panel, x: touch.clientX, y: touch.clientY };
+}, { passive: true });
+document.addEventListener("touchend", (event) => {
+  const start = writingSwipeStart;
+  writingSwipeStart = null;
+  if (!start || !window.matchMedia("(max-width: 760px)").matches || state.bookWritingFull || !document.body.classList.contains("book-detail-route")) return;
+  const touch = event.changedTouches[0];
+  if (touch) handleWritingSwipe(start, touch.clientX, touch.clientY);
+}, { passive: true });
+document.addEventListener("touchcancel", () => { writingSwipeStart = null; }, { passive: true });
+document.addEventListener("mousedown", (event) => {
+  if (!window.matchMedia("(max-width: 760px)").matches || state.bookWritingFull || !document.body.classList.contains("book-detail-route") || event.button !== 0) return;
+  const panel = event.target.closest(".book-writing-panel");
+  if (!panel || event.target.closest("textarea,input,select,button,a,[contenteditable=\"true\"]")) return;
+  writingMouseSwipeStart = { panel, x: event.clientX, y: event.clientY };
+}, { passive: true });
+document.addEventListener("mousemove", (event) => {
+  if (!writingMouseSwipeStart) return;
+  writingMouseSwipeStart.endX = event.clientX;
+  writingMouseSwipeStart.endY = event.clientY;
+}, { passive: true });
+document.addEventListener("mouseup", (event) => {
+  const start = writingMouseSwipeStart;
+  writingMouseSwipeStart = null;
+  handleWritingSwipe(start, start?.endX ?? event.clientX, start?.endY ?? event.clientY);
+}, { passive: true });
+document.addEventListener("mouseleave", () => { writingMouseSwipeStart = null; }, { passive: true });
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-author-delete]");
   if (!button) return;
@@ -512,10 +554,10 @@ function setHomeBannerLinks(leftBanner, rightBanner) {
 async function books() {
   const giftOnly = state.authKind === "gift";
   const items = giftOnly && state.giftSession?.bookId ? [await api(`/api/books/${state.giftSession.bookId}`)] : await api("/api/books");
-  const createAction = giftOnly ? "" : `<a class="books-create-button home-note-purchase" href="#create">새 이야기 만들기</a>`;
+  const createAction = giftOnly ? "" : `<a class="books-create-button home-note-purchase" href="#create">+ 새 이야기 만들기</a>`;
   const emptyAction = giftOnly ? "" : `<a class="button primary" href="#create">책 만들기</a>`;
   const cards = giftOnly ? items.map(giftBookCard).join("") : items.map(bookCard).join("");
-  app.innerHTML = `<section class="books-page ${giftOnly ? "gift-only-books" : ""}"><div class="books-description"><span class="books-subject">내 이야기</span><div class="books-description-row"><div class="books-lead">나에게 맞는 속도로 언제든 편하게 작성하고 저장하세요.<br>이미 작성이 완료된 이야기도 다시 수정할 수 있어요.</div>${createAction}</div></div>${items.length ? `<div class="my-books-grid">${cards}</div>` : `<div class="panel empty"><h2>아직 만든 책이 없어요.</h2><p>첫 번째 이야기를 시작해 보세요.</p>${emptyAction}</div>`}</section>`;
+  app.innerHTML = `<section class="books-page ${giftOnly ? "gift-only-books" : ""}"><div class="books-description"><span class="books-subject">내 이야기</span><div class="books-description-row"><div class="books-lead">나에게 맞는 속도로 언제든 편하게 작성하고 저장하세요.<br> 이미 작성이 완료된 이야기도 다시 수정할 수 있어요.</div>${createAction}</div></div>${items.length ? `<div class="my-books-grid">${cards}</div>` : `<div class="panel empty"><h2>아직 만든 책이 없어요.</h2><p>첫 번째 이야기를 시작해 보세요.</p>${emptyAction}</div>`}</section>`;
 }
 
 async function profile() {
@@ -562,6 +604,24 @@ const bookTypeIllustrationOptions = [
 ];
 function bookTypeIllustration(type, index) { const name = String(type.name || "").toLowerCase(); if (/single parent|싱글.*부모|한부모/.test(name)) return "book-type-single-parent.png"; if (/couple|커플|부부/.test(name)) return "book-type-couple.png"; if (/single|싱글/.test(name)) return "book-type-single.png"; if (/parent|부모/.test(name)) return "book-type-parents.png"; return ["book-type-parents.png", "book-type-single.png", "book-type-single-parent.png", "book-type-couple.png"][index % 4]; }
 function bookTypeDesign(type) { const name = String(type?.name || "").toLowerCase(); const description = String(type?.description || ""); const image = bookTypeIllustrationOptions.some((option) => option.value === type?.coverImage) ? type.coverImage : /couple|커플|부부/.test(name) ? "book-type-couple.png" : /parent|부모/.test(name) || /부모님/.test(description) ? "book-type-parents.png" : /single|싱글/.test(name) ? "book-type-single.png" : "book-type-single-parent.png"; return { image }; }
+function syncBookQuestionScroll(previousScrollLeft = null) {
+  if (state.bookWritingFull || !window.matchMedia("(max-width: 760px)").matches) return;
+  requestAnimationFrame(() => {
+    const list = app.querySelector(".book-question-list");
+    const active = list?.querySelector('[data-book-page][aria-current="page"]');
+    if (!list || !active) return;
+    if (Number.isFinite(previousScrollLeft)) list.scrollLeft = previousScrollLeft;
+    const listRect = list.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    const edge = 10;
+    const nextLeft = activeRect.left < listRect.left + edge
+      ? list.scrollLeft + activeRect.left - (listRect.left + edge)
+      : activeRect.right > listRect.right - edge
+        ? list.scrollLeft + activeRect.right - (listRect.right - edge)
+        : list.scrollLeft;
+    if (nextLeft !== list.scrollLeft) list.scrollTo({ left: nextLeft, behavior: "smooth" });
+  });
+}
 function createSteps(active) { const labels = ["북타입 선택", "기본정보", "안내", "질문생성"]; return `<div class="steps create-steps">${labels.map((label, index) => `${index ? "<i></i>" : ""}<span class="${active === index + 1 ? "active" : ""}">0${index + 1} ${label}</span>`).join("")}</div>`; }
 function bookCard(b) { const design = bookTypeDesign(b); return `<article class="my-book-card book-card" data-go="book/${b.id}"><span class="my-book-status ${b.status === "published" ? "published" : ""}">${b.status === "published" ? "출판완료" : `작성중 <em>${b.progress}%</em>`}</span><div class="my-book-main"><div class="my-book-title"><p class="my-book-script">My Story</p><p class="my-book-name">${escapeHtml(b.title)}</p></div><div class="my-book-from-to"><strong>${escapeHtml(b.sender || "보내는 사람이")}(이)가</strong><img src="/assets/home-category-line.svg" alt="" aria-hidden="true"><strong>${escapeHtml(b.receiver || "받는 사람")}에게</strong></div></div><div class="my-book-illustration"><img src="/assets/${design.image}" alt="${escapeHtml(b.bookTypeName)} 유형 일러스트"></div></article>`; }
 function giftBookCard(b) { return `<article class="gift-book-card" data-go="book/${b.id}" style="background-color:${escapeHtml(b.coverColor || "")}"><span class="gift-book-status ${b.status === "published" ? "published" : ""}">${b.status === "published" ? "출판완료" : `작성중 <em>${b.progress}%</em>`}</span><div class="gift-book-main"><div class="gift-book-title"><p class="gift-book-script">My Story</p><p class="gift-book-name">${escapeHtml(b.title)}</p></div><div class="gift-book-from-to"><strong>${escapeHtml(b.sender || "보내는 사람이")}(이)가</strong><img src="/assets/home-category-line.svg" alt="" aria-hidden="true"><strong>${escapeHtml(b.receiver || "받는 사람")}에게</strong></div></div><div class="gift-book-cover"><img src="${escapeHtml(b.coverImageUrl || "")}" alt="${escapeHtml(b.title)} 표지"></div></article>`; }
@@ -653,7 +713,11 @@ async function copyGiftCode() {
 }
 
 async function book(id, selectedPage = null) {
+  const bookRenderId = state.renderId;
+  const previousQuestionList = app.querySelector(".book-question-list");
+  const previousScrollLeft = previousQuestionList?.scrollLeft ?? null;
   const b = await api(`/api/books/${id}`); state.currentBook = b;
+  if (bookRenderId !== state.renderId) return;
   const all = b.outline.groups.flatMap(g => g.questions);
   const pages = b.outline.groups.flatMap(group => [{ type: "group", groupId: group.id, group }, ...group.questions.map(question => ({ type: "question", questionId: question.id, question, group }))]);
   const selectedIndex = selectedPage?.type === "group"
@@ -685,10 +749,11 @@ async function book(id, selectedPage = null) {
   const writingContent = page.type === "group" ? `<div class="book-group-height-reference" aria-hidden="true"><div class="book-writing-question"><span>01</span><h2>${escapeHtml(groupHeightReference.content)}</h2>${groupHeightReference.description ? `<p>${escapeHtml(groupHeightReference.description)}</p>` : ""}</div><span class="book-writing-save-state">저장되지 않음</span><textarea class="book-answer-input">${escapeHtml(groupHeightReference.answer)}</textarea><div class="book-writing-footer"><p>30초마다 자동 저장됩니다. 사진·음성·동영상 첨부는 다음 버전에서 제공됩니다.</p><button class="button small" type="button">저장</button></div></div><div class="book-group-divider-page">${page.group.imageUrl ? `<img src="${escapeHtml(page.group.imageUrl)}" alt="${escapeHtml(page.group.name)} 대표 이미지">` : ""}</div>` : `<div class="book-writing-question"><span>${questionNumber}</span><h2>${escapeHtml(selected.content)}</h2>${selected.description ? `<p>${escapeHtml(selected.description)}</p>` : ""}</div><span id="saveState" class="book-writing-save-state">${updated ? `저장됨 ${updated}` : "저장되지 않음"}</span><textarea id="answerInput" class="book-answer-input" placeholder="기억나는 이야기를 자유롭게 적어 주세요.">${escapeHtml(selected.answer)}</textarea><div class="book-writing-footer"><p>30초마다 자동 저장됩니다. 사진·음성·동영상 첨부는 다음 버전에서 제공됩니다.</p><button class="button small" type="button" data-save-inline-answer="true">저장</button></div>`;
   const cover = bookTypeDesign({ name: b.bookTypeName, coverImage: b.coverImage }).image;
   app.innerHTML = `<section class="book-detail-page ${state.bookWritingFull ? "book-writing-full" : ""}">
-    <div class="book-detail-head"><div class="book-detail-info"><a class="book-back" href="#books">← 내 이야기 목록</a><h1>${escapeHtml(b.title)}</h1><button class="book-detail-edit" type="button" data-open-book-info="${b.id}">📝 기본정보 수정하기</button></div><div class="book-detail-illustration"><img src="/assets/${cover}" alt="${escapeHtml(b.bookTypeName)} 유형 일러스트"><span>${b.status === "published" ? "출판완료" : "작성중"}</span></div></div>
-    <div class="book-detail-stats"><div class="book-detail-stat-progress" style="width:${b.totalQuestions ? Math.max(0, Math.min(100, b.progress)) : 0}%"></div><div><b>${b.totalQuestions}</b><span>전체질문</span></div><div><b>${b.completedQuestions}</b><span>작성완료</span></div><div><b>${b.progress}%</b><span>진행상태</span></div><div class="book-detail-actions"><a class="button small" href="/preview/${b.id}" data-open-book-output="${b.id}" data-output-type="preview" target="_blank" rel="noopener">미리보기</a><a class="button small" href="#publish/${b.id}">출판하기 (PDF저장)</a>${state.authKind === "gift" ? "" : `<button class="book-trash-button" type="button" data-open-book-delete="${b.id}" aria-label="책 삭제"><img src="/assets/icn_trash.svg" alt=""></button>`}</div></div>
+    <div class="book-detail-head"><div class="book-detail-info"><a class="book-back" href="#books">← 내 이야기 목록</a><div class="book-detail-title-actions"><h1>${escapeHtml(b.title)}</h1> <button class="book-detail-edit" type="button" data-open-book-info="${b.id}">📝 기본정보 수정하기</button></div></div><div class="book-detail-illustration"><img src="/assets/${cover}" alt="${escapeHtml(b.bookTypeName)} 유형 일러스트"><span>${b.status === "published" ? "출판완료" : "작성중"}</span></div></div>
+    <div class="book-detail-stats"><div class="book-detail-progress-highlight"><div class="book-detail-stat-progress" style="width:${b.totalQuestions ? Math.max(0, Math.min(100, b.progress)) : 0}%"></div><div class="book-detail-progress-row"><div class="book-detail-mobile-progress-status"><b>${b.progress}%</b><span>진행상태</span></div><div class="book-detail-actions"><a class="button small" href="/preview/${b.id}" data-open-book-output="${b.id}" data-output-type="preview" target="_blank" rel="noopener">미리보기</a><a class="button small" href="#publish/${b.id}">출력하기</a>${state.authKind === "gift" ? "" : `<button class="book-trash-button" type="button" data-open-book-delete="${b.id}" aria-label="책 삭제"><img src="/assets/icn_trash.svg" alt=""></button>`}</div></div></div><div class="book-detail-progress-content"><div><b>${b.totalQuestions}</b><span>전체질문</span></div><div><b>${b.completedQuestions}</b><span>작성완료</span></div><div><b>${b.progress}%</b><span>진행상태</span></div></div></div>
     <div class="book-writing-layout"><aside class="book-question-list">${groupList}</aside><section class="book-writing-panel"><div class="book-writing-tools"><button class="book-writing-view-toggle" type="button" data-notewindow-toggle aria-label="${state.bookWritingFull ? "전체보기" : "작성영역만 보기"}" aria-pressed="${state.bookWritingFull}"><img src="/assets/${state.bookWritingFull ? "notewindow_dashboard.svg" : "notewindow_full.svg"}" alt=""></button></div><div class="book-writing-content${page.type === "group" ? " book-writing-group-content" : ""}">${writingContent}</div><div class="book-writing-navigation">${previous ? `<a href="#book/${b.id}/${previous.type === "group" ? `group-${previous.groupId}` : `question-${previous.questionId}`}" aria-label="이전 ${previous.type === "group" ? "질문그룹" : "질문"}"><img src="/assets/arrow_previous_1.svg" alt="이전 페이지"></a>` : `<span></span>`}${next ? `<a href="#book/${b.id}/${next.type === "group" ? `group-${next.groupId}` : `question-${next.questionId}`}" aria-label="다음 ${next.type === "group" ? "질문그룹" : "질문"}"><img src="/assets/arrow_next_1.svg" alt="다음 페이지"></a>` : `<span></span>`}</div></section></div>
   </section>`;
+  syncBookQuestionScroll(previousScrollLeft);
   if (selected) state.autoSave = setInterval(() => saveAnswer(b.id, selected.id, false, true), 30000);
 }
 
