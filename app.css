@@ -318,6 +318,9 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
 .create-basic-field{display:grid;gap:7px;margin-bottom:40px;color:#39332e;font-weight:500}
 .create-basic-field:last-of-type{margin-bottom:0}
 .create-basic-field .guide_02{font-family:"Apple SD Gothic Neo",sans-serif;font-size:12px;font-weight:400;line-height:normal;color:#363636}
+.required-mark{position:relative;top:-.15em;color:#FF6F5E;font-size:.9em;line-height:0}
+.create-basic-self{display:flex;align-items:center;gap:8px;margin-top:24px;color:#363636;font:400 12px/normal "Apple SD Gothic Neo",sans-serif}
+.create-basic-self input{width:16px;height:16px;margin:0;accent-color:#363636}
 .create-basic-field input,.create-basic-field textarea{width:100%;border:0;border-bottom:1px solid #b2b2b2;border-radius:0;background:transparent;padding:10px 0;color:#363636;font-family:"Apple SD Gothic Neo",sans-serif;font-size:16px;font-weight:700;line-height:1.8;text-align:left}
 .create-basic-field input::placeholder,.create-basic-field textarea::placeholder{color:#b2b2b2;font:700 16px/1.8 "Apple SD Gothic Neo",sans-serif;opacity:1;text-align:left}
 .create-basic-field input:focus,.create-basic-field textarea:focus{outline:0;border-bottom-color:#9b5d42;box-shadow:none}

@@ -1,6 +1,8 @@
 const app = document.querySelector("#app");
 const toast = document.querySelector("#toast");
 const topbar = document.querySelector("#topbar");
+const DEFAULT_BOOK_TITLE = "오래보고 자세히 보면 모두 어여쁜 인생입니다";
+const DEFAULT_RECIPIENT_MESSAGE = "내 곁에 있어 주셔서 감사합니다.\n꼭 하고 싶었던 말을 이제서야 드립니다.\n당신을 사랑합니다.";
 const state = { createType: null, createStep: 1, currentBook: null, currentUserId: null, authKind: null, giftSession: null, autoSave: null, bookWritingFull: false, giftCreateType: null, giftCreateStep: 1, giftDraft: null, giftCover: null, giftResult: null, giftSubmitting: false, giftCopyTimer: null, profileSaved: false, renderId: 0, writingBooksCache: null, mobileMenuOpen: false, mobileStoryOpen: false };
 const createClient = window.supabase?.createClient;
 let authClient = null;
@@ -137,6 +139,7 @@ document.addEventListener("click", async (event) => {
   } catch (error) { toastMsg(error.message); }
 });
 document.addEventListener("submit", onGiftLoginSubmit, true);
+document.addEventListener("submit", validateBasicInfoSubmit, true);
 document.addEventListener("submit", onSubmit);
 document.addEventListener("submit", onProfileSubmit, true);
 document.addEventListener("input", onInput);
@@ -645,7 +648,7 @@ function giftBookCard(b) { return `<article class="gift-book-card" data-go="book
 async function create() {
   const types = await api("/api/book-types");
   if (state.createStep === 1) { const activeTypes = types.filter(t => t.isActive); app.innerHTML = `<section class="create-page"><div class="create-intro"><p class="create-kicker">웹에서 ‘나의 이야기’ 시작하기</p><h1>오래보고 자세히 보면 모두 아름다운 인생입니다.</h1><p>어느 정도 나이를 먹고 보니 내 삶과 부모님의 삶도 돌아봐야겠다는 생각이 들었습니다.<br>가족을 사랑하는 것은 그냥 의무 같을 때가 많았던 거 같고요.<br>들여다보고 알아야 나 자신조차 이해하고 사랑할 수 있는 거 같아요.</p></div><div class="steps"><b>01 북타입 선택</b><i></i>02 기본정보<i></i>03 안내<i></i>04 질문생성</div><div class="grid cards create-type-cards">${activeTypes.map(t => { const design = bookTypeDesign(t); return `<article class="card book-card ${state.createType === t.id ? "selected" : ""}" data-pick-type="${t.id}"><div class="cover"><span class="thumbnail-title">My Story</span><span class="thumbnail-type">${escapeHtml(t.name)}</span><img src="/assets/${design.image}" alt="${escapeHtml(t.name)} 유형 일러스트"></div><div class="muted">${escapeHtml(t.description)}</div></article>`; }).join("")}</div><div class="actions"><a class="button ghost" href="#home">취소</a></div></section>`; }
-  else if (state.createStep === 2) app.innerHTML = `<section class="create-page create-flow create-basic-page"><div class="create-intro create-basic-intro"><p class="create-kicker">나의 이야기를 위한 정보</p><h1>책의 기본정보를 입력해 주세요.</h1><p>책에 담길 이름과 인사말을 차분히 적어 주세요.</p></div>${createSteps(2)}<form id="create-basic-form" class="form create-basic-form" data-form="create-book"><label class="create-basic-field"><span class="guide_02">책 제목</span><input name="title" value="${escapeHtml(state.bookDraft?.title || "")}" placeholder="오래보고 자세히 보면 모두 어여쁜 인생입니다" required></label><label class="create-basic-field"><span class="guide_02">보내는 사람</span><input name="sender" value="${escapeHtml(state.bookDraft?.sender || "")}" placeholder="이름 (딸, 가을)"></label><label class="create-basic-field"><span class="guide_02">받는 사람</span><input name="receiver" value="${escapeHtml(state.bookDraft?.receiver || "")}" placeholder="이름 (엄마, 이겨울)"></label><label class="create-basic-field"><span class="guide_02">인사말</span><textarea name="introduction" placeholder="내 곁에 있어 주셔서 감사합니다&#10;꼭 하고 싶었던 말을 이제서야 드립니다&#10;고맙고 미안하고 사랑합니다.">${escapeHtml(state.bookDraft?.introduction || "")}</textarea></label></form><div class="create-basic-actions actions"><button type="button" class="button ghost" data-create-back>이전</button><button type="submit" form="create-basic-form" class="button primary">다음 →</button></div></section>`;
+  else if (state.createStep === 2) { const isSelf = state.bookDraft?.isSelf === true; app.innerHTML = `<section class="create-page create-flow create-basic-page"><div class="create-intro create-basic-intro"><p class="create-kicker">나의 이야기를 위한 정보</p><h1>책의 기본정보를 입력해 주세요.</h1><p>책에 담길 이름과 인사말을 차분히 적어 주세요.</p></div>${createSteps(2)}<form id="create-basic-form" class="form create-basic-form" data-form="create-book"><label class="create-basic-field"><span class="guide_02">책 제목</span><input name="title" value="${escapeHtml(state.bookDraft?.title || "")}" placeholder="${DEFAULT_BOOK_TITLE}"></label><label class="create-basic-field"><span class="guide_02">보내는 사람${isSelf ? "" : ' <sup class="required-mark">*</sup>'}</span><input name="sender" value="${escapeHtml(state.bookDraft?.sender || "")}" placeholder="이름 (딸, 가을)" ${isSelf ? "" : "required"}></label><label class="create-basic-field"><span class="guide_02">받는 사람${isSelf ? "" : ' <sup class="required-mark">*</sup>'}</span><input name="receiver" value="${escapeHtml(state.bookDraft?.receiver || "")}" placeholder="이름 (엄마, 이겨울)" ${isSelf ? "" : "required"}></label><label class="create-basic-field"><span class="guide_02">인사말</span><textarea name="introduction" placeholder="${DEFAULT_RECIPIENT_MESSAGE}">${escapeHtml(state.bookDraft?.introduction || "")}</textarea></label><label class="create-basic-self"><input type="checkbox" name="isSelf" data-self-book ${isSelf ? "checked" : ""}><span>내가 나에게</span></label></form><div class="create-basic-actions actions"><button type="button" class="button ghost" data-create-back>이전</button><button type="submit" form="create-basic-form" class="button primary">다음 →</button></div></section>`; }
   else if (state.createStep === 3) app.innerHTML = `<section class="create-page create-flow create-info-page"><div class="create-intro"><p class="create-kicker">작성 전에 확인해 주세요</p><h1>당신의 속도로 이야기를 시작하세요.</h1><p>완벽한 답보다, 지금 떠오르는 기억을 남기는 것이 더 중요합니다.</p></div>${createSteps(3)}<div class="create-info-list"><section><h2>작성 방법</h2><p>정답은 없습니다. 기억나는 만큼 자유롭게 작성해 주세요.</p></section><section><h2>저장 방법</h2><p>작성 중인 답변은 30초마다 자동 저장되며, 저장 버튼으로 직접 저장할 수도 있습니다.</p></section><section><h2>개인정보</h2><p>작성 내용은 나의 책에만 저장됩니다.</p></section><div class="actions"><button class="button ghost" data-create-back>이전</button><button class="button primary" data-next-create>다음 →</button></div></div></section>`;
   else { const type = types.find(t => t.id === state.createType); const design = bookTypeDesign(type); app.innerHTML = `<section class="create-page create-flow create-outline-page"><div class="create-intro"><p class="create-kicker">나의 이야기 목차</p><h1>질문을 확인하고 책을 시작하세요.</h1><p>선택한 질문은 책을 만든 뒤에도 답변을 작성하며 확인할 수 있습니다.</p></div>${createSteps(4)}<div class="create-outline"><div class="create-outline-content"><div class="outline-thumbnail-column"><div class="outline-thumbnail"><span class="thumbnail-title">My Story</span><span class="thumbnail-type">${escapeHtml(type.name)}</span><img src="/assets/${design.image}" alt="${escapeHtml(type.name)} 유형 일러스트"></div><p class="outline-thumbnail-summary">선택한 질문그룹 ${type.questionGroups.length}개 · 총 ${type.questionCount}개의 질문</p></div><div class="outline-groups">${type.questionGroups.map((g, index) => `<section class="outline-group"><h3><span>${String(index + 1).padStart(2, "0")}</span><span>${escapeHtml(g.name)}</span></h3></section>`).join("")}<div class="actions"><button class="button ghost" data-create-back>이전</button><button class="button primary" data-create-confirm>이 질문으로 책 만들기 →</button></div></div></div></div></section>`; }
 }
@@ -664,6 +667,11 @@ async function giftCreate() {
   }
   if (state.giftCreateStep === 2) {
     app.innerHTML = `<section class="create-page create-flow create-basic-page gift-create-page gift-basic-page"><div class="create-intro create-basic-intro"><p class="create-kicker">선물하기</p><h1>책의 기본정보를 입력해 주세요.</h1><p>선물받을 사람을 생각하며 이름과 인사말을 적어 주세요.</p></div>${giftSteps(2)}<form id="gift-basic-form" class="form create-basic-form" data-form="gift-basic"><label class="create-basic-field"><span class="guide_02">책 제목</span><input name="title" value="${escapeHtml(state.giftDraft?.title || "")}" placeholder="오래보고 자세히 보면 모두 어여쁜 인생입니다" required></label><label class="create-basic-field"><span class="guide_02">보내는 사람</span><input name="sender" value="${escapeHtml(state.giftDraft?.sender || "")}" placeholder="이름 (딸, 가을)"></label><label class="create-basic-field"><span class="guide_02">받는 사람</span><input name="receiver" value="${escapeHtml(state.giftDraft?.receiver || "")}" placeholder="이름 (엄마, 이겨울)"></label><label class="create-basic-field"><span class="guide_02">인사말</span><textarea name="introduction" placeholder="내 곁에 있어 주셔서 감사합니다&#10;꼭 하고 싶었던 말을 이제서야 드립니다&#10;고맙고 미안하고 사랑합니다.">${escapeHtml(state.giftDraft?.introduction || "")}</textarea></label></form><div class="create-basic-actions actions gift-create-actions"><button type="button" class="button ghost" data-gift-back>이전</button><button type="submit" form="gift-basic-form" class="button primary">다음 →</button></div></section>`;
+    const giftForm = document.querySelector("#gift-basic-form");
+    giftForm?.elements.title?.removeAttribute("required");
+    giftForm?.elements.sender?.setAttribute("required", "required");
+    giftForm?.elements.receiver?.setAttribute("required", "required");
+    if (giftForm) { giftForm.elements.title.placeholder = DEFAULT_BOOK_TITLE; giftForm.elements.introduction.placeholder = DEFAULT_RECIPIENT_MESSAGE; giftForm.querySelector('input[name="sender"]')?.closest("label")?.querySelector(".guide_02")?.insertAdjacentHTML("beforeend", ' <sup class="required-mark">*</sup>'); giftForm.querySelector('input[name="receiver"]')?.closest("label")?.querySelector(".guide_02")?.insertAdjacentHTML("beforeend", ' <sup class="required-mark">*</sup>'); }
     return;
   }
   if (state.giftCreateStep === 3) {
@@ -730,21 +738,25 @@ async function copyGiftCode() {
 }
 
 function maskGiftCode(code) { const value = String(code || ""); return value.length > 16 ? `${value.slice(0, 8)}******${value.slice(-8)}` : `${value.slice(0, 4)}******`; }
+function buildGiftShareMessage({ shareUrl, receiveUrl, code }) {
+  return `당신에게 ‘나의 이야기’를 선물합니다.\n\n선물코드: ${code}\n\n미리보기 1·2페이지 확인하기\n${shareUrl}\n\n선물 확인하기\n${receiveUrl}\n\n선물코드로 접속한 뒤 받은 책을 선택하면\n이야기를 작성할 수 있습니다.`;
+}
 async function createGiftShareMessage(method) {
   const result = state.giftResult;
   if (!result?.gift?.id || !result.code) throw new Error("선물 정보를 찾을 수 없습니다.");
   const shareHeaders = result.shareActionToken ? { "X-Share-Action-Token": result.shareActionToken } : {};
   const response = await api(`/api/gifts/${result.gift.id}/share`, { method: "POST", headers: shareHeaders });
   const shareUrl = new URL(response.shareUrl, location.origin).href;
+  const receiveUrl = new URL("/#login", location.origin).href;
   await authedApi(`/api/account/gifts/${result.gift.id}/deliveries`, { method: "POST", headers: shareHeaders, body: { method } });
-  const message = `선물 미리보기 1·2페이지\n${shareUrl}\n\n선물코드\n${result.code}\n\n선물 접속 URL\n${shareUrl}`;
-  return { shareUrl, message };
+  const message = buildGiftShareMessage({ shareUrl, receiveUrl, code: result.code });
+  return { shareUrl, receiveUrl, message };
 }
 async function shareGift(method) {
   try {
     const { shareUrl, message } = await createGiftShareMessage(method);
     if (method === "email") {
-      location.href = `mailto:?subject=${encodeURIComponent("나의 이야기 선물")}&body=${encodeURIComponent(message)}`;
+      location.href = `mailto:?subject=${encodeURIComponent("‘나의 이야기’ 선물이 도착했습니다")}&body=${encodeURIComponent(message)}`;
       return;
     }
     if (navigator.share) {
@@ -1062,6 +1074,7 @@ async function removeAdmin(kind, id) { if (!confirm("정말 삭제하시겠습�
 function updateBookTypePreview(form) { const preview = form.querySelector("[data-type-preview]"); if (!preview) return; const name = form.elements.name.value || "Parents"; const image = form.elements.coverImage.value; const previewImage = preview.querySelector("[data-preview-image]"); previewImage.src = `/assets/${image}`; previewImage.alt = `${name} 유형 일러스트`; }
 function onInput(e) { const form = e.target.closest('form[data-kind="type"]'); if (!form) return; if (["coverColor", "textColor"].includes(e.target.name)) { e.target.value = e.target.value.replace(/[^#0-9a-f]/gi, "").replace(/(?!^)#/g, "").slice(0, 7); const preview = form.querySelector("[data-cover-preview]"); if (!preview) return; const coverColor = form.elements.coverColor.value; const textColor = form.elements.textColor.value; preview.style.background = /^#[0-9a-f]{6}$/i.test(coverColor) ? coverColor : "#00BC3C"; preview.style.color = /^#[0-9a-f]{6}$/i.test(textColor) ? textColor : "#FFFFFF"; return; } if (["name", "description"].includes(e.target.name)) updateBookTypePreview(form); }
 function onChange(e) {
+  if (e.target.matches("[data-self-book]")) { const form = e.target.form; state.bookDraft = { ...Object.fromEntries(new FormData(form)), isSelf: e.target.checked }; return create(); }
   if (e.target.matches("[data-dashboard-period]")) { const value = e.target.value; if (value === "custom") return admin("dashboard"); return loadAdminDashboard(value); }
   if (e.target.matches('input[name="coverImage"], input[name="coverColor"], input[name="giftCoverImage"], input[name="giftCoverColor"]')) {
     const page = e.target.closest(".publish-page, .gift-create-page");
@@ -1079,6 +1092,16 @@ function onChange(e) {
   if (e.target.name === "coverImage") return updateBookTypePreview(e.target.form);
   if (e.target.name !== "image" || !e.target.files?.[0]) return;
   const preview = e.target.form?.querySelector("[data-banner-preview]"); if (!preview) return; preview.src = URL.createObjectURL(e.target.files[0]); preview.classList.remove("admin-banner-preview-empty"); preview.textContent = "";
+}
+function validateBasicInfoSubmit(e) {
+  const form = e.target;
+  if (!form.matches('form[data-form="create-book"], form[data-form="gift-basic"]')) return;
+  const isSelf = form.dataset.form === "create-book" && form.elements.isSelf?.checked === true;
+  const sender = String(form.elements.sender?.value || "").trim();
+  const receiver = String(form.elements.receiver?.value || "").trim();
+  if (!isSelf && (!sender || !receiver)) { e.preventDefault(); e.stopImmediatePropagation(); toastMsg("보내는 사람과 받는 사람을 입력하세요."); return; }
+  form.elements.title.value = String(form.elements.title?.value || "").trim() || DEFAULT_BOOK_TITLE;
+  form.elements.introduction.value = String(form.elements.introduction?.value || "").trim() || DEFAULT_RECIPIENT_MESSAGE;
 }
 
 async function loadAdminDashboard(period, from = "", to = "") { const query = new URLSearchParams({ period }); if (from) query.set("from", from); if (to) query.set("to", to); try { const data = await api(`/api/admin/dashboard?${query}`); app.innerHTML = `<div class="admin-layout"><nav class="panel side-menu" aria-label="관리자 메뉴"></nav><main class="admin-content">${adminDashboardExpanded(data)}</main></div>`; renderAdminMenu("dashboard"); normalizeAdminPageStructure(); } catch (error) { toastMsg(error.message); } }
