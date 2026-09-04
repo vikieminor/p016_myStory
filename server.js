@@ -50,6 +50,8 @@ const tables = {
   answers: { file: "my-book-answers.json", table: "my_book_answers", map: answerMap },
   publications: { file: "publications.json", table: "publications", map: publicationMap },
   gifts: { file: "gifts.json", table: "gifts", map: giftMap },
+  giftShareTokens: { file: "gift-share-tokens.json", table: "gift_share_tokens", map: giftShareTokenMap },
+  giftDeliveries: { file: "gift-deliveries.json", table: "gift_deliveries", map: giftDeliveryMap },
   giftSessions: { file: "gift-sessions.json", table: "gift_sessions", map: giftSessionMap },
   coverColors: { file: "cover-colors.json", table: "cover_colors", map: coverColorMap },
   coverImages: { file: "cover-images.json", table: "cover_images", map: coverImageMap },
@@ -68,6 +70,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/auth/naver") return void await naverStartRoute(req, res);
     if (req.method === "GET" && url.pathname === "/auth/naver/callback") return void await naverCallbackRoute(req, res, url);
     if (url.pathname.startsWith("/api/")) return void await handleApi(req, res, url);
+    if (url.pathname.startsWith("/gift-share/")) return void await renderGiftSharePage(req, res, decodeURIComponent(url.pathname.slice("/gift-share/".length)));
     if (url.pathname.startsWith("/print/")) return void await renderBookOutput(req, res, Number(url.pathname.split("/").pop()), true);
     if (url.pathname.startsWith("/preview/")) return void await renderBookOutput(req, res, Number(url.pathname.split("/").pop()), false);
     await serveStatic(res, url.pathname);
@@ -85,11 +88,21 @@ async function handleApi(req, res, url) {
   const body = ["POST", "PUT", "PATCH"].includes(method) ? await readJsonBody(req) : {};
 
   if (method === "GET" && pathName === "/api/bootstrap") return sendJson(res, 200, await dashboard());
+  if (method === "GET" && pathName === "/api/admin/dashboard") {
+    if (!(await requireAdmin(req, res))) return;
+    return sendJson(res, 200, await giftDashboard(url.searchParams));
+  }
   if (method === "GET" && pathName === "/api/auth/config") return authConfigRoute(res);
   if (method === "GET" && pathName === "/api/auth/me") return void await authMeRoute(req, res);
   if ((method === "GET" || method === "PUT") && pathName === "/api/auth/profile") return void await authProfileRoute(req, res, method, body);
   if (method === "GET" && pathName === "/api/account/gifts") return void await accountGiftsRoute(req, res);
+  const accountGiftDetailMatch = pathName.match(/^\/api\/account\/gifts\/(\d+)$/);
+  if (accountGiftDetailMatch) return void await accountGiftDetailRoute(req, res, method, Number(accountGiftDetailMatch[1]));
+  const deliveryMatch = pathName.match(/^\/api\/account\/gifts\/(\d+)\/deliveries$/);
+  if (deliveryMatch) return void await giftDeliveryRoute(req, res, method, Number(deliveryMatch[1]), body);
   if (method === "POST" && pathName === "/api/gifts") return void await createGiftRoute(req, res, body);
+  const giftShareMatch = pathName.match(/^\/api\/gifts\/(\d+)\/share$/);
+  if (giftShareMatch) return void await giftShareRoute(req, res, method, Number(giftShareMatch[1]));
   if (method === "POST" && pathName === "/api/gifts/login") return void await giftLoginRoute(req, res, body);
   if (method === "POST" && pathName === "/api/gifts/logout") return void await giftLogoutRoute(req, res);
   if (method === "GET" && pathName === "/api/gifts/session") return void await giftSessionRoute(req, res);
@@ -161,7 +174,11 @@ async function handleApi(req, res, url) {
     const author = await getActiveMomentAuthor(user);
     if (!author) return sendJson(res, 403, { error: "Moments 작성 권한이 없습니다." });
     const slots = await list("momentSlots");
-    return sendJson(res, 200, { takenTimes: slots.filter((slot) => slot.isActive !== false).map((slot) => slot.slotTime), myTimes: slots.filter((slot) => slot.authorId === author.id && slot.isActive !== false).map((slot) => slot.slotTime) });
+    const entries = await list("momentEntries");
+    const today = seoulDateParts().date;
+    const takenTimes = new Set(entries.filter((entry) => entry.momentDate === today).map((entry) => entry.slotTime).filter(Boolean));
+    const recentEntry = entries.filter((entry) => entry.authorId === author.id).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+    return sendJson(res, 200, { today, takenTimes: [...takenTimes], myTimes: recentEntry?.slotTime ? [recentEntry.slotTime] : [] });
   }
 
   if (pathName === "/api/admin/home/moments" || /^\/api\/admin\/home\/moments\/\d+$/.test(pathName)) {
@@ -211,6 +228,13 @@ async function handleApi(req, res, url) {
   if (method === "GET" && pathName === "/api/admin/gifts") {
     if (!(await requireAdmin(req, res))) return;
     return sendJson(res, 200, await presentAdminGifts());
+  }
+  const adminGiftMatch = pathName.match(/^\/api\/admin\/gifts\/(\d+)$/);
+  if (adminGiftMatch) {
+    if (!(await requireAdmin(req, res))) return;
+    if (method !== "GET") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
+    const detail = await presentAdminGiftDetail(Number(adminGiftMatch[1]));
+    return detail ? sendJson(res, 200, detail) : sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
   }
 
   sendJson(res, 404, { error: "API 경로를 찾을 수 없습니다." });
@@ -365,6 +389,31 @@ async function createGiftRoute(req, res, body) {
   }
 }
 
+async function giftShareRoute(req, res, method, giftId) {
+  if (method !== "POST") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
+  const user = await authenticatedUser(req);
+  if (!user) return sendJson(res, 401, { error: "계정 로그인이 필요합니다." });
+  const gift = await get("gifts", giftId);
+  if (!gift || gift.senderUserId !== user.id) return sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
+  const token = randomBytes(32).toString("base64url");
+  await create("giftShareTokens", { giftId, tokenHash: hashGiftSessionToken(token) });
+  return sendJson(res, 201, { shareUrl: `/gift-share/${token}` });
+}
+
+async function renderGiftSharePage(req, res, token) {
+  let tokenHash;
+  try { tokenHash = hashGiftSessionToken(token); } catch { return sendText(res, 404, "Not Found"); }
+  const share = (await list("giftShareTokens")).find((item) => equalSecret(item.tokenHash, tokenHash) && !item.revokedAt);
+  const gift = share ? await get("gifts", share.giftId) : null;
+  if (!gift || gift.status !== "active" || gift.revokedAt) return sendText(res, 404, "Not Found");
+  const book = await get("books", gift.bookId);
+  if (!book) return sendText(res, 404, "Not Found");
+  const details = await presentBook(book, true);
+  const pages = buildBookOutputPages(details).slice(0, 2);
+  const body = pages.map((page, index) => renderBookOutputPage(page, index + 1)).join("");
+  sendHtml(res, `<!doctype html><html lang="ko"><meta charset="utf-8"><title>${escapeHtml(book.title)} 선물 미리보기</title><link rel="stylesheet" href="/app.css"><style>body{margin:0;background:#eee8e2;color:#363636;font-family:"Apple SD Gothic Neo",sans-serif}.gift-share-page{max-width:900px;margin:0 auto;padding:48px 20px}.gift-share-intro{margin-bottom:32px;text-align:center}.gift-share-intro h1{margin:0 0 12px;font-family:"KoPub Batang",serif;font-weight:400}.gift-share-intro p{margin:0;color:#756d63}.gift-share-pages{display:flex;flex-direction:column;align-items:center;gap:28px}.gift-share-pages .book-output-page{box-shadow:0 8px 24px #4c33201f}.gift-share-note{margin-top:32px;padding:24px;background:#f8f6ea;text-align:center;white-space:pre-line}</style><main class="gift-share-page"><section class="gift-share-intro"><h1>${escapeHtml(book.title)}</h1><p>${escapeHtml(book.sender || "보내는 사람")}님이 준비한 선물입니다.</p></section><section class="gift-share-pages">${body}</section><p class="gift-share-note">선물코드로 로그인하면 선물받은 책을 이어서 작성할 수 있습니다.\n선물코드는 선물을 보낸 사람에게 확인해 주세요.</p></main></html>`);
+}
+
 async function giftCoverSelection(body) {
   const hasColor = body.coverColorId !== undefined || body.coverColor !== undefined;
   const hasImage = body.coverImageId !== undefined || body.coverImage !== undefined;
@@ -406,7 +455,11 @@ async function bookRoute(res, method, id, action, body, access) {
   const book = await get("books", id);
   if (!book) return sendJson(res, 404, { error: "마이북을 찾을 수 없습니다." });
   if (!authorizeBookAccess(book, access)) return sendJson(res, 404, { error: "마이북을 찾을 수 없습니다." });
-  if (!action && method === "GET") return sendJson(res, 200, await presentBook(book, true));
+  if (!action && method === "GET") {
+    if (access.kind === "account" || access.kind === "gift") await update("books", id, { lastAccessedAt: new Date().toISOString() });
+    return sendJson(res, 200, await presentBook(await get("books", id), true));
+  }
+  if (access.kind === "account" && !isAdminUser(access.user) && book.ownerId === access.user.id && (await list("gifts")).some((gift) => gift.bookId === book.id) && method !== "GET") return sendJson(res, 403, { error: "선물한 사람은 선물받은 책을 수정할 수 없습니다." });
   if (!action && method === "PUT") {
     if (!String(body.title || "").trim()) return sendJson(res, 400, { error: "책 제목을 입력하세요." });
     return sendJson(res, 200, await presentBook(await update("books", id, { title: body.title.trim(), sender: String(body.sender || "").trim(), receiver: String(body.receiver || "").trim(), introduction: String(body.introduction || "").trim() }), true));
@@ -462,6 +515,70 @@ async function dashboard() {
   const [groups, questions, bookTypes, books] = await Promise.all([list("groups"), list("questions"), list("bookTypes"), list("books")]);
   return { stats: { groups: groups.length, questions: questions.length, activeQuestions: questions.filter((q) => q.isActive).length, bookTypes: bookTypes.length, books: books.length, publishedBooks: books.filter((b) => b.status === "published").length }, bookTypes: await presentBookTypes(), books: await presentBooks(), groups: await presentGroups() };
 }
+
+function dateRangeFor(searchParams) {
+  const period = searchParams.get("period") || "month";
+  const now = new Date();
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(now);
+  if (period === "all") start.setTime(0);
+  else if (period === "today") start.setHours(0, 0, 0, 0);
+  else if (period === "week") { const day = start.getDay() || 7; start.setDate(start.getDate() - day + 1); start.setHours(0, 0, 0, 0); }
+  else if (period === "custom") {
+    const from = searchParams.get("from"); const to = searchParams.get("to");
+    if (from) start.setTime(new Date(`${from}T00:00:00`).getTime());
+    else start.setDate(1);
+    if (to) end.setTime(new Date(`${to}T23:59:59.999`).getTime());
+  } else start.setDate(1);
+  if (Number.isNaN(start.getTime())) start.setDate(1);
+  if (Number.isNaN(end.getTime())) end.setTime(now.getTime());
+  return { period, start, end };
+}
+function giftProgressStatus(gift, progress) {
+  if (!gift.lastAccessedAt) return "not_accessed";
+  if (progress === 0) return "not_started";
+  if (progress >= 100) return "completed";
+  return "writing";
+}
+function giftBucketKey(date, granularity) {
+  const iso = new Date(date).toISOString();
+  return granularity === "month" ? iso.slice(0, 7) : iso.slice(0, 10);
+}
+async function giftDashboard(searchParams = new URLSearchParams()) {
+  const { period, start, end } = dateRangeFor(searchParams);
+  const gifts = await list("gifts");
+  const scoped = gifts.filter((gift) => { const time = new Date(gift.createdAt).getTime(); return time >= start.getTime() && time <= end.getTime(); });
+  const books = await list("books");
+  const bookById = new Map(books.map((book) => [book.id, book]));
+  const scopedBooks = books.filter((book) => { const time = new Date(book.createdAt).getTime(); return time >= start.getTime() && time <= end.getTime(); });
+  const presentedBooks = new Map((await Promise.all(scoped.map(async (gift) => { const book = bookById.get(gift.bookId); return [gift.id, book ? await presentBook(book) : null]; }))).filter(([, book]) => book).map(([giftId, book]) => [giftId, book]));
+  const presentedScopedBooks = await Promise.all(scopedBooks.map((book) => presentBook(book)));
+  const accessed = scoped.filter((gift) => gift.lastAccessedAt).length;
+  const completed = scoped.filter((gift) => giftProgressStatus(gift, presentedBooks.get(gift.id)?.progress) === "completed").length;
+  const writing = scoped.filter((gift) => giftProgressStatus(gift, presentedBooks.get(gift.id)?.progress) === "writing").length;
+  const granularity = period === "all" || (period === "custom" && end - start > 62 * 86400000) ? "month" : "day";
+  const trendMap = new Map();
+  scoped.forEach((gift) => { const key = giftBucketKey(gift.createdAt, granularity); trendMap.set(key, (trendMap.get(key) || 0) + 1); });
+  const deliveries = await list("giftDeliveries");
+  const deliveryCounts = { kakao: 0, email: 0, code: 0 };
+  scoped.forEach((gift) => {
+    const first = deliveries.filter((item) => item.giftId === gift.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
+    const method = first?.method || gift.initialDeliveryMethod;
+    if (method && Object.hasOwn(deliveryCounts, method)) deliveryCounts[method] += 1;
+  });
+  const giftByBookId = new Map(gifts.map((gift) => [gift.bookId, gift]));
+  const accessedBooks = presentedScopedBooks.filter((book) => book.lastAccessedAt || giftByBookId.get(book.id)?.lastAccessedAt).length;
+  const typeCounts = Object.fromEntries(["Parents", "Couple", "Single Parent", "Single"].map((name) => [name, presentedScopedBooks.filter((book) => book.bookTypeName === name).length]));
+  const authors = await list("momentAuthors");
+  const users = await listAuthUsers();
+  const normalUsers = users.filter((user) => !isAdminUser(user) && !authors.some((author) => author.id === user.id && ["author", "admin"].includes(author.role)));
+  const periodUsers = normalUsers.filter((user) => isWithinRange(user.created_at, start, end));
+  const activeUsers = normalUsers.filter((user) => isWithinRange(user.last_sign_in_at, start, end));
+  return { period, from: start.toISOString(), to: end.toISOString(), granularity, stats: { gifts: scoped.length, accessRate: scoped.length ? Math.round(accessed / scoped.length * 100) : 0, writing, completed }, trend: [...trendMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([label, count]) => ({ label, count })), deliveryCounts, books: { total: presentedScopedBooks.length, accessRate: presentedScopedBooks.length ? Math.round(accessedBooks / presentedScopedBooks.length * 100) : 0, writing: presentedScopedBooks.filter((book) => book.progress >= 1 && book.progress <= 99).length, completed: presentedScopedBooks.filter((book) => book.progress >= 100).length, shared: presentedScopedBooks.filter((book) => book.previewAllowed === true).length, byType: typeCounts }, users: { total: normalUsers.length, new: periodUsers.length, active: activeUsers.length, gifted: null } };
+}
+
+function isWithinRange(value, start, end) { if (!value) return false; const time = new Date(value).getTime(); return !Number.isNaN(time) && time >= start.getTime() && time <= end.getTime(); }
 
 function normalizeEmail(email) { return String(email || "").trim().toLowerCase(); }
 function isAdminUser(user) { return Boolean(ADMIN_EMAIL) && normalizeEmail(user?.email) === normalizeEmail(ADMIN_EMAIL); }
@@ -893,6 +1010,26 @@ async function accountGiftsRoute(req, res) {
   if (!user) return sendJson(res, 401, { error: "로그인이 필요합니다." });
   return sendJson(res, 200, await presentUserGifts(user.id));
 }
+async function accountGiftDetailRoute(req, res, method, giftId) {
+  if (method !== "GET") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
+  const user = await authenticatedUser(req);
+  if (!user) return sendJson(res, 401, { error: "로그인이 필요합니다." });
+  const gift = await get("gifts", giftId);
+  if (!gift || gift.senderUserId !== user.id) return sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
+  return sendJson(res, 200, await presentAdminGiftDetail(giftId));
+}
+async function giftDeliveryRoute(req, res, method, giftId, body) {
+  if (method !== "POST") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
+  const user = await authenticatedUser(req);
+  if (!user) return sendJson(res, 401, { error: "로그인이 필요합니다." });
+  const gift = await get("gifts", giftId);
+  if (!gift || gift.senderUserId !== user.id) return sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
+  const methodName = String(body.method || "").toLowerCase();
+  if (!["kakao", "email", "code"].includes(methodName)) return sendJson(res, 400, { error: "지원하지 않는 전달방식입니다." });
+  const delivery = await create("giftDeliveries", { giftId, method: methodName, metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : null });
+  if (!gift.initialDeliveryMethod) await update("gifts", giftId, { initialDeliveryMethod: methodName });
+  return sendJson(res, 201, { id: delivery.id, giftId, method: methodName, createdAt: delivery.createdAt });
+}
 
 async function momentAuthorRoute(res, method, id, body) {
   if (method === "GET" && id === null) return sendJson(res, 200, await listMomentAuthorUsers());
@@ -954,8 +1091,7 @@ async function authorMomentRoute(res, method, id, body, user) {
   if (id === null) return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
   const entry = await get("momentEntries", id);
   if (!entry) return sendJson(res, 404, { error: "Moments를 찾을 수 없습니다." });
-  const slot = await get("momentSlots", entry.slotId);
-  if (!slot || slot.authorId !== author.id) return sendJson(res, 403, { error: "자신의 Moments만 관리할 수 있습니다." });
+  if (entry.authorId !== author.id) return sendJson(res, 403, { error: "자신의 Moments만 관리할 수 있습니다." });
   if (method === "GET") return sendJson(res, 200, await presentMomentEntry(entry));
   if (method === "PUT") {
     try { return sendJson(res, 200, await updateOwnMoment(entry, body)); } catch (error) { return sendMomentError(res, error); }
@@ -985,31 +1121,36 @@ async function adminMomentRoute(res, method, id, body) {
 async function saveMoment(authorId, body) {
   if (!authorId) throw new Error("작가를 확인할 수 없습니다.");
   if (!/^\d{2}:\d{2}$/.test(String(body.slotTime || "")) || Number(body.slotTime.slice(0, 2)) > 23 || Number(body.slotTime.slice(3)) > 59) throw new Error("시간은 HH:MM 형식이어야 합니다.");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.momentDate || ""))) throw new Error("날짜는 YYYY-MM-DD 형식이어야 합니다.");
+  const momentDate = String(body.momentDate || seoulDateParts().date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(momentDate)) throw new Error("날짜는 YYYY-MM-DD 형식이어야 합니다.");
   if (!String(body.body || "").trim()) throw new Error("메모를 입력하세요.");
   const authors = await list("momentAuthors");
   if (!authors.some((author) => author.id === authorId && author.isActive)) throw new Error("등록된 작가가 아닙니다.");
   const slots = await list("momentSlots");
-  let slot = slots.find((item) => item.slotTime === body.slotTime);
+  let slot = slots.find((item) => item.authorId === authorId);
   let createdSlot = false;
-  if (slot && slot.authorId !== authorId) throw Object.assign(new Error("선택한 시간은 이미 다른 작가가 사용 중입니다."), { code: "DUPLICATE_SLOT" });
   if (!slot) {
     try { slot = await create("momentSlots", { authorId, slotTime: body.slotTime, isActive: true }); createdSlot = true; } catch (error) { if (String(error.message).includes("duplicate") || String(error.message).includes("unique")) throw Object.assign(new Error("선택한 시간은 이미 다른 작가가 사용 중입니다."), { code: "DUPLICATE_SLOT" }); throw error; }
   }
   const entries = await list("momentEntries");
-  const existing = entries.find((item) => item.slotId === slot.id && item.momentDate === body.momentDate);
+  if (entries.some((entry) => entry.authorId !== authorId && entry.momentDate === momentDate && entry.slotTime === body.slotTime)) throw Object.assign(new Error("선택한 시간은 해당 날짜에 이미 사용 중입니다."), { code: "DUPLICATE_SLOT" });
+  const existing = entries.find((item) => item.authorId === authorId && item.momentDate === momentDate);
   try {
-    return presentMomentEntry(existing ? await update("momentEntries", existing.id, { body: String(body.body).trim(), isVisible: body.isVisible !== false && body.isVisible !== "false", publishedAt: body.publishedAt || null }) : await create("momentEntries", { slotId: slot.id, momentDate: body.momentDate, body: String(body.body).trim(), isVisible: body.isVisible !== false && body.isVisible !== "false", publishedAt: body.publishedAt || null }));
+    if (slot.slotTime !== body.slotTime) slot = await update("momentSlots", slot.id, { slotTime: body.slotTime });
+    return presentMomentEntry(existing ? await update("momentEntries", existing.id, { slotTime: body.slotTime, body: String(body.body).trim(), isVisible: body.isVisible !== false && body.isVisible !== "false", publishedAt: body.publishedAt || null }) : await create("momentEntries", { slotId: slot.id, authorId, slotTime: body.slotTime, momentDate, body: String(body.body).trim(), isVisible: body.isVisible !== false && body.isVisible !== "false", publishedAt: body.publishedAt || null }));
   } catch (error) { if (createdSlot) await remove("momentSlots", slot.id); throw error; }
 }
 
 async function updateOwnMoment(entry, body) {
   if (!String(body.body || "").trim()) throw new Error("메모를 입력하세요.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.momentDate || entry.momentDate))) throw new Error("날짜는 YYYY-MM-DD 형식이어야 합니다.");
-  return presentMomentEntry(await update("momentEntries", entry.id, { body: String(body.body).trim(), momentDate: body.momentDate || entry.momentDate, isVisible: body.isVisible !== false && body.isVisible !== "false", publishedAt: body.publishedAt || null }));
+  const nextDate = body.momentDate || entry.momentDate;
+  const entries = await list("momentEntries");
+  if (entries.some((item) => item.id !== entry.id && item.authorId !== entry.authorId && item.momentDate === nextDate && item.slotTime === entry.slotTime)) throw Object.assign(new Error("선택한 시간은 해당 날짜에 이미 사용 중입니다."), { code: "DUPLICATE_SLOT" });
+  return presentMomentEntry(await update("momentEntries", entry.id, { body: String(body.body).trim(), momentDate: nextDate, isVisible: body.isVisible !== false && body.isVisible !== "false", publishedAt: body.publishedAt || null }));
 }
 
-async function presentAuthorMoments(authorId) { const slots = await list("momentSlots"); const slotIds = new Set(slots.filter((slot) => slot.authorId === authorId).map((slot) => slot.id)); return Promise.all((await list("momentEntries")).filter((entry) => slotIds.has(entry.slotId)).map(presentMomentEntry)); }
+async function presentAuthorMoments(authorId) { return Promise.all((await list("momentEntries")).filter((entry) => entry.authorId === authorId).map(presentMomentEntry)); }
 async function authorMomentsPdfRoute(res, author) {
   const entries = (await presentAuthorMoments(author.id)).sort(sortMomentsByCreatedAt);
   if (!entries.length) return sendJson(res, 404, { error: "저장된 Moments가 없습니다." });
@@ -1038,22 +1179,22 @@ function createMomentsPdf(displayName, entries) {
 }
 function formatMomentPdfDate(date) { const [year, month, day] = String(date).split("-").map(Number); return `${year}년 ${month}월 ${day}일`; }
 async function presentAllMoments() { try { return Promise.all((await list("momentEntries")).sort((a, b) => String(b.momentDate).localeCompare(String(a.momentDate)) || Number(a.slotId) - Number(b.slotId)).map(presentMomentEntry)); } catch (error) { if (isMissingMomentTable(error)) return []; throw error; } }
-async function presentPublicMoments(authorId) { const now = new Date(); const slots = await list("momentSlots"); const slotIds = new Set(slots.filter((slot) => slot.authorId === authorId && slot.isActive !== false).map((slot) => slot.id)); const entries = await Promise.all((await list("momentEntries")).filter((entry) => slotIds.has(entry.slotId) && entry.isVisible && (!entry.publishedAt || new Date(entry.publishedAt) <= now)).map(presentMomentEntry)); return entries.sort(sortMomentsByCreatedAt); }
+async function presentPublicMoments(authorId) { const now = new Date(); const entries = await Promise.all((await list("momentEntries")).filter((entry) => entry.authorId === authorId && entry.isVisible && (!entry.publishedAt || new Date(entry.publishedAt) <= now)).map(presentMomentEntry)); return entries.sort(sortMomentsByCreatedAt); }
 function sortMomentsByCreatedAt(a, b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); }
-async function presentMomentEntry(entry) { const slot = await get("momentSlots", entry.slotId); const author = slot ? await get("momentAuthors", slot.authorId) : null; return { ...entry, slotTime: slot?.slotTime || "", authorId: slot?.authorId || "", author: author?.displayName || "", isSlotActive: slot?.isActive !== false }; }
+async function presentMomentEntry(entry) { const slot = await get("momentSlots", entry.slotId); const author = entry.authorId ? await get("momentAuthors", entry.authorId) : null; return { ...entry, slotTime: entry.slotTime || slot?.slotTime || "", authorId: entry.authorId || "", author: author?.displayName || "", isSlotActive: slot?.isActive !== false }; }
 async function presentCurrentMoment() {
   try {
   const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
-  const value = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-  const today = `${value.year}-${value.month}-${value.day}`;
-  const currentTime = `${value.hour}:${value.minute}`;
+  const value = seoulDateParts(now);
+  const today = value.date;
+  const currentTime = value.time;
   const entries = await list("momentEntries"); const slots = await list("momentSlots");
-  const eligible = entries.filter((entry) => entry.isVisible && (!entry.publishedAt || new Date(entry.publishedAt) <= now)).map((entry) => ({ entry, slot: slots.find((item) => item.id === entry.slotId) })).filter((item) => item.slot?.isActive !== false && (item.entry.momentDate < today || (item.entry.momentDate === today && item.slot.slotTime <= currentTime))).sort((a, b) => String(b.entry.momentDate).localeCompare(String(a.entry.momentDate)) || b.slot.slotTime.localeCompare(a.slot.slotTime) || String(b.entry.createdAt || "").localeCompare(String(a.entry.createdAt || "")));
+  const eligible = entries.filter((entry) => entry.isVisible && (!entry.publishedAt || new Date(entry.publishedAt) <= now)).map((entry) => ({ entry, slot: slots.find((item) => item.id === entry.slotId) })).filter((item) => item.slot?.isActive !== false && item.entry.slotTime && (item.entry.momentDate < today || (item.entry.momentDate === today && item.entry.slotTime <= currentTime))).sort((a, b) => String(b.entry.momentDate).localeCompare(String(a.entry.momentDate)) || b.entry.slotTime.localeCompare(a.entry.slotTime) || String(b.entry.createdAt || "").localeCompare(String(a.entry.createdAt || "")));
   if (!eligible.length) return null;
   const item = await presentMomentEntry(eligible[0].entry); return { time: formatMomentTime(item.slotTime), date: formatMomentDate(item.momentDate), body: item.body, author: item.author, authorId: item.authorId, more: "more", moreUrl: `#moments-detail/${encodeURIComponent(item.authorId)}` };
   } catch (error) { if (isMissingMomentTable(error)) return null; throw error; }
 }
+function seoulDateParts(value = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(value); const dateParts = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value])); return { date: `${dateParts.year}-${dateParts.month}-${dateParts.day}`, time: `${dateParts.hour}:${dateParts.minute}` }; }
 function formatMomentTime(time) { const [hour] = time.split(":").map(Number); const suffix = hour < 12 ? "a. m." : "p. m."; const displayHour = hour % 12 || 12; return `${displayHour} ${suffix}`; }
 function formatMomentDate(date) { const [year, month, day] = date.split("-").map(Number); const weekday = ["Sun", "Mon", "Tues", "Wed", "Thurs", "Fri", "Sat"][new Date(Date.UTC(year, month - 1, day)).getUTCDay()]; return `${year}/${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${weekday}`; }
 function sendMomentError(res, error) { if (error.code === "DUPLICATE_SLOT") return sendJson(res, 409, { error: error.message }); return sendJson(res, 400, { error: error.message || "Moments를 저장할 수 없습니다." }); }
@@ -1118,9 +1259,16 @@ async function presentAdminGifts() {
     const book = await get("books", gift.bookId);
     if (!book) return null;
     const presentedBook = await presentBook(book);
-    return { id: gift.id, sender: presentedBook.sender, receiver: presentedBook.receiver, title: presentedBook.title, bookTypeName: presentedBook.bookTypeName, progress: presentedBook.progress, createdAt: gift.createdAt, lastAccessedAt: gift.lastAccessedAt, status: gift.status };
+    return { id: gift.id, sender: presentedBook.sender, receiver: presentedBook.receiver, title: presentedBook.title, bookTypeName: presentedBook.bookTypeName, progress: presentedBook.progress, createdAt: gift.createdAt, lastAccessedAt: gift.lastAccessedAt, status: gift.status, progressStatus: giftProgressStatus(gift, presentedBook.progress), publicationStatus: book.status };
   }));
   return rows.filter(Boolean);
+}
+async function presentAdminGiftDetail(id) {
+  const gift = await get("gifts", id); if (!gift) return null;
+  const book = await get("books", gift.bookId); if (!book) return null;
+  const presentedBook = await presentBook(book);
+  const deliveries = (await list("giftDeliveries")).filter((item) => item.giftId === gift.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return { id: gift.id, bookId: book.id, sender: presentedBook.sender, receiver: presentedBook.receiver, title: presentedBook.title, bookTypeName: presentedBook.bookTypeName, createdAt: gift.createdAt, lastAccessedAt: gift.lastAccessedAt, progress: presentedBook.progress, progressStatus: giftProgressStatus(gift, presentedBook.progress), publicationStatus: book.status, previewAllowed: presentedBook.previewAllowed === true, initialDeliveryMethod: gift.initialDeliveryMethod || null, deliveries: deliveries.map((item) => ({ method: item.method, createdAt: item.createdAt })) };
 }
 async function presentUserGifts(userId) {
   const gifts = (await list("gifts")).filter((gift) => gift.senderUserId === userId).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
@@ -1128,7 +1276,7 @@ async function presentUserGifts(userId) {
     const book = await get("books", gift.bookId);
     if (!book) return null;
     const presentedBook = await presentBook(book);
-    return { id: gift.id, receiver: presentedBook.receiver, title: presentedBook.title, bookTypeName: presentedBook.bookTypeName, progress: presentedBook.progress, createdAt: gift.createdAt, lastAccessedAt: gift.lastAccessedAt, status: gift.status };
+    return { id: gift.id, bookId: book.id, receiver: presentedBook.receiver, title: presentedBook.title, bookTypeName: presentedBook.bookTypeName, progress: presentedBook.progress, createdAt: gift.createdAt, lastAccessedAt: gift.lastAccessedAt, status: gift.status, progressStatus: giftProgressStatus(gift, presentedBook.progress), publicationStatus: book.status, previewAllowed: presentedBook.previewAllowed === true };
   }));
   return rows.filter(Boolean);
 }
@@ -1216,6 +1364,7 @@ async function renderBookOutput(req, res, id, print) {
   const access = await authenticateRequest(req, res);
   if (!access) return sendText(res, 401, "로그인이 필요합니다.");
   if (!authorizeBookAccess(book, access)) return sendText(res, 404, "Not Found");
+  if (access.kind === "account" && !isAdminUser(access.user) && book.ownerId === access.user.id && (await list("gifts")).some((gift) => gift.bookId === book.id) && book.previewAllowed !== true) return sendText(res, 403, "미리보기가 허용되지 않은 선물입니다.");
   const details = await presentBook(book, true);
   const pages = buildBookOutputPages(details);
   const body = `<style>@page{size:A5 portrait;margin:0}.book-output-answer{width:100%;height:calc(13 * 41.6px);margin:0;color:#b26d3b;font:700 16px/2.6 "Apple SD Gothic Neo",sans-serif;letter-spacing:-.64px;white-space:pre-wrap;word-break:keep-all;overflow-wrap:normal;overflow:hidden;background:repeating-linear-gradient(to bottom,transparent 0,transparent 40.6px,#eadfd8 40.6px,#eadfd8 41.6px);background-size:100% 41.6px;print-color-adjust:exact;-webkit-print-color-adjust:exact}.book-output-script{font-family:"Reenie Beanie",cursive;color:#FFFFFF}.book-output-fixed-copy{max-width:205px;margin:48px auto 0;color:#FFFFFF;font:400 12px/1.8 "Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;word-break:keep-all}.book-output-cover-image{display:block;width:100px;height:150px;margin:24px auto 0;object-fit:contain}.book-output-title h1{color:#363636}.book-output-publisher{margin:20px 0 0;color:#363636;font:700 13px/1.8 "Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif}.book-output-copyright{position:absolute;right:20px;bottom:74px;color:#FFFFFF;font:400 8px/1.4 "Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;text-align:right;writing-mode:vertical-rl;white-space:nowrap}</style>${pages.map((page, index) => renderBookOutputPage(page, index + 1)).join("")}`;
@@ -1297,10 +1446,12 @@ function questionMap(row) { return { id: row.id, content: row.content, descripti
 function questionBookTypeMap(row) { return { id: row.id || `${row.question_id}-${row.book_type_id}`, questionId: row.question_id, bookTypeId: row.book_type_id }; } questionBookTypeMap.from = questionBookTypeMap; questionBookTypeMap.to = (v) => ({ question_id: v.questionId, book_type_id: v.bookTypeId });
 function bookTypeMap(row) { return { id: row.id, name: row.name, description: row.description || "", coverImage: row.cover_image || "classic", coverColor: row.cover_color || "#00BC3C", textColor: row.text_color || "#FFFFFF", sortOrder: row.sort_order || 1, isActive: row.is_active, createdAt: row.created_at, updatedAt: row.updated_at }; } bookTypeMap.from = bookTypeMap; bookTypeMap.to = (v) => fields(v, { name: "name", description: "description", coverImage: "cover_image", coverColor: "cover_color", textColor: "text_color", sortOrder: "sort_order", isActive: "is_active", updatedAt: "updated_at" });
 function linkMap(row) { return { id: row.id || `${row.book_type_id}-${row.question_group_id}`, bookTypeId: row.book_type_id, questionGroupId: row.question_group_id }; } linkMap.from = linkMap; linkMap.to = (v) => ({ book_type_id: v.bookTypeId, question_group_id: v.questionGroupId });
-function bookMap(row) { return { id: row.id, ownerId: row.owner_id || null, bookTypeId: row.book_type_id, title: row.title, sender: row.sender || "", receiver: row.receiver || "", introduction: row.introduction || "", status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, publishedAt: row.published_at }; } bookMap.from = bookMap; bookMap.to = (v) => fields(v, { ownerId: "owner_id", bookTypeId: "book_type_id", title: "title", sender: "sender", receiver: "receiver", introduction: "introduction", status: "status", updatedAt: "updated_at", publishedAt: "published_at" });
+function bookMap(row) { return { id: row.id, ownerId: row.owner_id || null, bookTypeId: row.book_type_id, title: row.title, sender: row.sender || "", receiver: row.receiver || "", introduction: row.introduction || "", status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, lastAccessedAt: row.last_accessed_at || null, previewAllowed: row.preview_allowed === true, publishedAt: row.published_at }; } bookMap.from = bookMap; bookMap.to = (v) => fields(v, { ownerId: "owner_id", bookTypeId: "book_type_id", title: "title", sender: "sender", receiver: "receiver", introduction: "introduction", status: "status", updatedAt: "updated_at", lastAccessedAt: "last_accessed_at", previewAllowed: "preview_allowed", publishedAt: "published_at" });
 function answerMap(row) { return { id: row.id, myBookId: row.my_book_id, questionId: row.question_id, answer: row.answer || "", isFinal: row.is_final, createdAt: row.created_at, updatedAt: row.updated_at }; } answerMap.from = answerMap; answerMap.to = (v) => fields(v, { myBookId: "my_book_id", questionId: "question_id", answer: "answer", isFinal: "is_final", updatedAt: "updated_at" });
 function publicationMap(row) { return { id: row.id, myBookId: row.my_book_id, coverStyle: row.cover_style, coverColor: row.cover_color || null, coverImage: row.cover_image || null, createdAt: row.created_at }; } publicationMap.from = publicationMap; publicationMap.to = (v) => fields(v, { myBookId: "my_book_id", coverStyle: "cover_style", coverColor: "cover_color", coverImage: "cover_image" });
-function giftMap(row) { return { id: row.id, bookId: row.book_id, senderUserId: row.sender_user_id || null, senderEmail: row.sender_email || null, status: row.status, giftCodeHash: row.gift_code_hash, codeVersion: row.code_version, createdAt: row.created_at, updatedAt: row.updated_at, lastAccessedAt: row.last_accessed_at, codeIssuedAt: row.code_issued_at, revokedAt: row.revoked_at }; } giftMap.from = giftMap; giftMap.to = (v) => fields(v, { bookId: "book_id", senderUserId: "sender_user_id", senderEmail: "sender_email", status: "status", giftCodeHash: "gift_code_hash", codeVersion: "code_version", updatedAt: "updated_at", lastAccessedAt: "last_accessed_at", codeIssuedAt: "code_issued_at", revokedAt: "revoked_at" });
+function giftMap(row) { return { id: row.id, bookId: row.book_id, senderUserId: row.sender_user_id || null, senderEmail: row.sender_email || null, status: row.status, giftCodeHash: row.gift_code_hash, codeVersion: row.code_version, initialDeliveryMethod: row.initial_delivery_method || null, createdAt: row.created_at, updatedAt: row.updated_at, lastAccessedAt: row.last_accessed_at, codeIssuedAt: row.code_issued_at, revokedAt: row.revoked_at }; } giftMap.from = giftMap; giftMap.to = (v) => fields(v, { bookId: "book_id", senderUserId: "sender_user_id", senderEmail: "sender_email", status: "status", giftCodeHash: "gift_code_hash", codeVersion: "code_version", initialDeliveryMethod: "initial_delivery_method", updatedAt: "updated_at", lastAccessedAt: "last_accessed_at", codeIssuedAt: "code_issued_at", revokedAt: "revoked_at" });
+function giftShareTokenMap(row) { return { id: row.id, giftId: row.gift_id, tokenHash: row.token_hash, createdAt: row.created_at, revokedAt: row.revoked_at || null }; } giftShareTokenMap.from = giftShareTokenMap; giftShareTokenMap.to = (v) => fields(v, { giftId: "gift_id", tokenHash: "token_hash", revokedAt: "revoked_at" });
+function giftDeliveryMap(row) { return { id: row.id, giftId: row.gift_id, method: row.method, createdAt: row.created_at, metadata: row.metadata || null }; } giftDeliveryMap.from = giftDeliveryMap; giftDeliveryMap.to = (v) => fields(v, { giftId: "gift_id", method: "method", createdAt: "created_at", metadata: "metadata" });
 function giftSessionMap(row) { return { id: row.id, giftId: row.gift_id, sessionTokenHash: row.session_token_hash, createdAt: row.created_at, lastAccessedAt: row.last_accessed_at, expiresAt: row.expires_at, revokedAt: row.revoked_at, userAgent: row.user_agent || null }; } giftSessionMap.from = giftSessionMap; giftSessionMap.to = (v) => fields(v, { id: "id", giftId: "gift_id", sessionTokenHash: "session_token_hash", lastAccessedAt: "last_accessed_at", expiresAt: "expires_at", revokedAt: "revoked_at", userAgent: "user_agent" });
 function coverColorMap(row) { return { id: row.id, name: row.name, colorValue: row.color_value, sortOrder: row.sort_order, isActive: row.is_active, createdAt: row.created_at, updatedAt: row.updated_at }; } coverColorMap.from = coverColorMap; coverColorMap.to = (v) => fields(v, { name: "name", colorValue: "color_value", sortOrder: "sort_order", isActive: "is_active", updatedAt: "updated_at" });
 function coverImageMap(row) { return { id: row.id, name: row.name, imagePath: row.image_path, column: row.image_column, sortOrder: row.sort_order, isActive: row.is_active, createdAt: row.created_at, updatedAt: row.updated_at }; } coverImageMap.from = coverImageMap; coverImageMap.to = (v) => fields(v, { name: "name", imagePath: "image_path", column: "image_column", sortOrder: "sort_order", isActive: "is_active", updatedAt: "updated_at" });
@@ -1308,7 +1459,7 @@ function homeReviewMap(row) { return { id: row.id, relationship: row.relationshi
 function homeBannerMap(row) { return { id: row.id, imagePath: row.image_path, caption: row.caption || "", linkUrl: row.link_url || "", position: row.position, isVisible: row.is_visible, createdAt: row.created_at, updatedAt: row.updated_at }; } homeBannerMap.from = homeBannerMap; homeBannerMap.to = (v) => fields(v, { id: "id", imagePath: "image_path", caption: "caption", linkUrl: "link_url", position: "position", isVisible: "is_visible", createdAt: "created_at", updatedAt: "updated_at" });
 function momentAuthorMap(row) { return { id: row.id, displayName: row.display_name, role: row.role, isActive: row.is_active, createdAt: row.created_at, updatedAt: row.updated_at }; } momentAuthorMap.from = momentAuthorMap; momentAuthorMap.to = (v) => fields(v, { id: "id", displayName: "display_name", role: "role", isActive: "is_active", updatedAt: "updated_at" });
 function momentSlotMap(row) { return { id: row.id, authorId: row.author_id, slotTime: String(row.slot_time).slice(0, 5), isActive: row.is_active, createdAt: row.created_at, updatedAt: row.updated_at }; } momentSlotMap.from = momentSlotMap; momentSlotMap.to = (v) => fields(v, { id: "id", authorId: "author_id", slotTime: "slot_time", isActive: "is_active", updatedAt: "updated_at" });
-function momentEntryMap(row) { return { id: row.id, slotId: row.slot_id, momentDate: row.moment_date, body: row.body, isVisible: row.is_visible, publishedAt: row.published_at, createdAt: row.created_at, updatedAt: row.updated_at }; } momentEntryMap.from = momentEntryMap; momentEntryMap.to = (v) => fields(v, { id: "id", slotId: "slot_id", momentDate: "moment_date", body: "body", isVisible: "is_visible", publishedAt: "published_at", updatedAt: "updated_at" });
+function momentEntryMap(row) { return { id: row.id, slotId: row.slot_id, authorId: row.author_id, slotTime: row.slot_time ? String(row.slot_time).slice(0, 5) : "", momentDate: row.moment_date, body: row.body, isVisible: row.is_visible, publishedAt: row.published_at, createdAt: row.created_at, updatedAt: row.updated_at }; } momentEntryMap.from = momentEntryMap; momentEntryMap.to = (v) => fields(v, { id: "id", slotId: "slot_id", authorId: "author_id", slotTime: "slot_time", momentDate: "moment_date", body: "body", isVisible: "is_visible", publishedAt: "published_at", updatedAt: "updated_at" });
 function fields(value, mapping) { return Object.fromEntries(Object.entries(mapping).filter(([key]) => key in value).map(([key, db]) => [db, value[key]])); }
 function sorter(a, b) { return Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name || a.content || "").localeCompare(String(b.name || b.content || ""), "ko"); }
 
