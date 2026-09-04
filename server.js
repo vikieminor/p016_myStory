@@ -22,6 +22,7 @@ const GIFT_CODE_PEPPER = process.env.GIFT_CODE_PEPPER || "";
 const GIFT_SESSION_COOKIE = "gift_session";
 const GIFT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GIFT_SESSION_TOUCH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const GIFT_SHARE_ACTION_TTL_MS = 15 * 60 * 1000;
 const GIFT_LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
 const GIFT_LOGIN_RATE_LIMIT = 10;
 const giftLoginAttempts = new Map();
@@ -378,7 +379,7 @@ async function createGiftRoute(req, res, body) {
     const code = createGiftCode();
     gift = await create("gifts", { bookId: book.id, senderUserId: user.id, senderEmail: user.email || null, status: "active", giftCodeHash: hashGiftCode(code), codeVersion: 1, codeIssuedAt: new Date().toISOString() });
     if (cover.selected) publication = await create("publications", { myBookId: book.id, coverStyle: cover.image, coverColor: cover.color, coverImage: cover.image });
-    return sendJson(res, 201, { gift: { id: gift.id, bookId: gift.bookId, status: gift.status }, code });
+    return sendJson(res, 201, { gift: { id: gift.id, bookId: gift.bookId, status: gift.status }, code, shareActionToken: createGiftShareActionToken(gift.id) });
   } catch (error) {
     await safeGiftCleanup({ giftId: gift?.id, publicationId: publication?.id, bookId: book?.id });
     console.error("선물용 책 생성 실패", error);
@@ -392,9 +393,9 @@ async function createGiftRoute(req, res, body) {
 async function giftShareRoute(req, res, method, giftId) {
   if (method !== "POST") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
   const user = await authenticatedUser(req);
-  if (!user) return sendJson(res, 401, { error: "계정 로그인이 필요합니다." });
+  const shareAction = verifyGiftShareActionToken(req.headers["x-share-action-token"], giftId);
   const gift = await get("gifts", giftId);
-  if (!gift || gift.senderUserId !== user.id) return sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
+  if (!gift || (!shareAction && (!user || gift.senderUserId !== user.id))) return sendJson(res, 401, { error: "계정 로그인이 필요합니다." });
   const token = randomBytes(32).toString("base64url");
   await create("giftShareTokens", { giftId, tokenHash: hashGiftSessionToken(token) });
   return sendJson(res, 201, { shareUrl: `/gift-share/${token}` });
@@ -590,6 +591,8 @@ function requireGiftCodePepper() {
 function normalizeGiftCode(code) { return String(code || "").replace(/[\s-]/g, "").toUpperCase(); }
 function hashGiftCode(code) { return createHmac("sha256", requireGiftCodePepper()).update(normalizeGiftCode(code), "utf8").digest("hex"); }
 function hashGiftSessionToken(token) { return createHmac("sha256", requireGiftCodePepper()).update(String(token), "utf8").digest("hex"); }
+function createGiftShareActionToken(giftId) { const payload = Buffer.from(JSON.stringify({ giftId: Number(giftId), expiresAt: Date.now() + GIFT_SHARE_ACTION_TTL_MS }), "utf8").toString("base64url"); const signature = createHmac("sha256", requireGiftCodePepper()).update(`share-action.${payload}`, "utf8").digest("base64url"); return `share-action.${payload}.${signature}`; }
+function verifyGiftShareActionToken(token, giftId) { try { const parts = String(token || "").split("."); if (parts.length !== 3 || parts[0] !== "share-action") return false; const expected = createHmac("sha256", requireGiftCodePepper()).update(`share-action.${parts[1]}`, "utf8").digest("base64url"); if (!equalSecret(parts[2], expected)) return false; const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")); return Number(payload.giftId) === Number(giftId) && Number(payload.expiresAt) > Date.now(); } catch { return false; } }
 function equalSecret(left, right) { const a = Buffer.from(String(left || ""), "utf8"); const b = Buffer.from(String(right || ""), "utf8"); return a.length === b.length && timingSafeEqual(a, b); }
 function createGiftCode() { requireGiftCodePepper(); return randomBytes(24).toString("base64url").toUpperCase(); }
 async function replaceGiftCode(giftId) {
@@ -1021,9 +1024,9 @@ async function accountGiftDetailRoute(req, res, method, giftId) {
 async function giftDeliveryRoute(req, res, method, giftId, body) {
   if (method !== "POST") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
   const user = await authenticatedUser(req);
-  if (!user) return sendJson(res, 401, { error: "로그인이 필요합니다." });
+  const shareAction = verifyGiftShareActionToken(req.headers["x-share-action-token"], giftId);
   const gift = await get("gifts", giftId);
-  if (!gift || gift.senderUserId !== user.id) return sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
+  if (!gift || (!shareAction && (!user || gift.senderUserId !== user.id))) return sendJson(res, 401, { error: "로그인이 필요합니다." });
   const methodName = String(body.method || "").toLowerCase();
   if (!["kakao", "email", "code"].includes(methodName)) return sendJson(res, 400, { error: "지원하지 않는 전달방식입니다." });
   const delivery = await create("giftDeliveries", { giftId, method: methodName, metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : null });

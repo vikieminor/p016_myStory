@@ -733,9 +733,10 @@ function maskGiftCode(code) { const value = String(code || ""); return value.len
 async function createGiftShareMessage(method) {
   const result = state.giftResult;
   if (!result?.gift?.id || !result.code) throw new Error("선물 정보를 찾을 수 없습니다.");
-  const response = await api(`/api/gifts/${result.gift.id}/share`, { method: "POST" });
+  const shareHeaders = result.shareActionToken ? { "X-Share-Action-Token": result.shareActionToken } : {};
+  const response = await api(`/api/gifts/${result.gift.id}/share`, { method: "POST", headers: shareHeaders });
   const shareUrl = new URL(response.shareUrl, location.origin).href;
-  await authedApi(`/api/account/gifts/${result.gift.id}/deliveries`, { method: "POST", body: { method } });
+  await authedApi(`/api/account/gifts/${result.gift.id}/deliveries`, { method: "POST", headers: shareHeaders, body: { method } });
   const message = `선물 미리보기 1·2페이지\n${shareUrl}\n\n선물코드\n${result.code}\n\n선물 접속 URL\n${shareUrl}`;
   return { shareUrl, message };
 }
