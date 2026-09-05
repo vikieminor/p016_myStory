@@ -30,6 +30,7 @@ const giftCreationLocks = new Set();
 const HOME_BANNER_BUCKET = "home-banners";
 const COVER_IMAGE_BUCKET = "cover-images";
 const DEFAULT_RECIPIENT_MESSAGE = "내 곁에 있어 주셔서 감사합니다.\n꼭 하고 싶었던 말을 이제서야 드립니다.\n당신을 사랑합니다.";
+const QUESTION_TEMPLATE_TYPES = new Set(["basic", "short-answer", "image", "short-answer-image", "segmented"]);
 // 원격 DB는 스키마 적용 뒤 명시적으로 활성화한다. 키만 있는 경우에는
 // 기존 data/ 샘플을 계속 보여 주어 빈 원격 DB로 데이터가 사라진 듯 보이지 않게 한다.
 const USE_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_KEY && process.env.USE_SUPABASE === "true");
@@ -138,6 +139,10 @@ async function handleApi(req, res, url) {
   if (pathName === "/api/admin/question-groups/image-upload") {
     if (!(await requireAdmin(req, res))) return;
     return void await questionGroupImageUploadRoute(res, method, body);
+  }
+  if (pathName === "/api/admin/question-image") {
+    if (!(await requireAdmin(req, res))) return;
+    return void await questionImageUploadRoute(res, method, body);
   }
 
   if (pathName === "/api/admin/moment-authors" || /^\/api\/admin\/moment-authors\/[^/]+$/.test(pathName)) {
@@ -295,7 +300,8 @@ async function questionRoute(res, method, id, toggle, body) {
     const error = await validateQuestion(body); if (error) return sendJson(res, 400, { error });
     const desiredOrder = Number(body.sortOrder);
     const previousQuestionGroupId = question.questionGroupId;
-    const updated = await update("questions", id, normalQuestion(body));
+    const existingConfig = question.templateConfig && typeof question.templateConfig === "object" ? question.templateConfig : {};
+    const updated = await update("questions", id, normalQuestion({ ...body, templateType: body.templateType ?? question.templateType, shortAnswerTitles: body.shortAnswerTitles ?? existingConfig.shortAnswerTitles, imageGuidance: body.imageGuidance ?? existingConfig.imageGuidance, imageUrl: body.imageUrl ?? existingConfig.imageUrl }));
     if (previousQuestionGroupId !== updated.questionGroupId) await reorderQuestions(null, null, previousQuestionGroupId);
     await reorderQuestions(id, desiredOrder, updated.questionGroupId);
     await setQuestionBookTypes(id, body.bookTypeIds);
@@ -887,6 +893,22 @@ async function questionGroupImageUploadRoute(res, method, body) {
   return sendJson(res, 201, { imagePath, imageUrl: publicHomeBannerUrl(imagePath) });
 }
 
+async function questionImageUploadRoute(res, method, body) {
+  if (method !== "POST") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
+  const contentType = String(body.contentType || "").toLowerCase();
+  const data = String(body.data || "");
+  if (!/^image\/(png|jpe?g|webp)$/.test(contentType)) return sendJson(res, 400, { error: "JPG, PNG, WEBP 이미지만 업로드할 수 있습니다." });
+  const base64 = data.replace(/^data:[^;]+;base64,/, "");
+  if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) return sendJson(res, 400, { error: "이미지 파일을 확인할 수 없습니다." });
+  const buffer = Buffer.from(base64, "base64");
+  if (!buffer.length || buffer.length > 10 * 1024 * 1024) return sendJson(res, 400, { error: "이미지는 10MB 이하만 업로드할 수 있습니다." });
+  if (!USE_SUPABASE) return sendJson(res, 201, { imagePath: `data:${contentType};base64,${base64}`, imageUrl: `data:${contentType};base64,${base64}` });
+  const extension = contentType.split("/")[1].replace("jpeg", "jpg");
+  const imagePath = `question-images/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
+  await uploadHomeBannerImage(imagePath, buffer, contentType);
+  return sendJson(res, 201, { imagePath, imageUrl: publicHomeBannerUrl(imagePath) });
+}
+
 function validateHomeBanner(body, updating) {
   if (!updating && !String(body.imagePath || "").trim()) return "배너 이미지를 업로드하세요.";
   if (updating && body.imagePath !== undefined && !String(body.imagePath || "").trim()) return "배너 이미지를 업로드하세요.";
@@ -1238,7 +1260,7 @@ function normalCoverImage(body, existing = null) { return { name: String(body.na
 
 async function presentGroups(search = "") { const questions = await list("questions"); return (await list("groups")).filter((g) => `${g.name}${g.description}`.includes(search)).sort(sorter).map((g) => ({ ...g, imageUrl: g.imagePath?.startsWith("data:") ? g.imagePath : publicHomeBannerUrl(g.imagePath), questionCount: questions.filter((q) => q.questionGroupId === g.id).length })); }
 async function presentGroup(group, detail = false) { const result = (await presentGroups()).find((item) => item.id === group.id); if (!detail) return result; return { ...result, questions: (await list("questions")).filter((q) => q.questionGroupId === group.id).sort(sorter) }; }
-async function presentQuestions(params = new URLSearchParams()) { const [groups, all, answers, links, bookTypes] = await Promise.all([list("groups"), list("questions"), list("answers"), list("questionBookTypes"), list("bookTypes")]); const groupSortOrders = new Map(groups.map((group) => [group.id, Number(group.sortOrder || 0)])); const search = params.get("search") || ""; const groupId = params.get("groupId"); const items = all.filter((q) => q.content.includes(search) && (!groupId || groupId === "all" || q.questionGroupId === Number(groupId))).sort((a, b) => groupSortOrders.get(a.questionGroupId) - groupSortOrders.get(b.questionGroupId) || Number(a.sortOrder || 0) - Number(b.sortOrder || 0)).map((q) => ({ ...q, questionGroupName: groups.find((g) => g.id === q.questionGroupId)?.name || "미지정", inUse: answers.some((a) => a.questionId === q.id), bookTypeIds: links.filter((link) => link.questionId === q.id).map((link) => link.bookTypeId), bookTypes: links.filter((link) => link.questionId === q.id).map((link) => bookTypes.find((type) => type.id === link.bookTypeId)).filter(Boolean).sort(sorter).map((type) => ({ id: type.id, name: type.name })) })); return { items, stats: { total: all.length, active: all.filter((q) => q.isActive).length, inactive: all.filter((q) => !q.isActive).length, inUse: answers.length } }; }
+async function presentQuestions(params = new URLSearchParams()) { const [groups, all, answers, links, bookTypes] = await Promise.all([list("groups"), list("questions"), list("answers"), list("questionBookTypes"), list("bookTypes")]); const groupSortOrders = new Map(groups.map((group) => [group.id, Number(group.sortOrder || 0)])); const search = params.get("search") || ""; const groupId = params.get("groupId"); const items = all.filter((q) => q.content.includes(search) && (!groupId || groupId === "all" || q.questionGroupId === Number(groupId))).sort((a, b) => groupSortOrders.get(a.questionGroupId) - groupSortOrders.get(b.questionGroupId) || Number(a.sortOrder || 0) - Number(b.sortOrder || 0)).map((q) => ({ ...q, templateType: QUESTION_TEMPLATE_TYPES.has(q.templateType) ? q.templateType : "basic", templateConfig: q.templateConfig && typeof q.templateConfig === "object" ? q.templateConfig : {}, questionGroupName: groups.find((g) => g.id === q.questionGroupId)?.name || "미지정", inUse: answers.some((a) => a.questionId === q.id), bookTypeIds: links.filter((link) => link.questionId === q.id).map((link) => link.bookTypeId), bookTypes: links.filter((link) => link.questionId === q.id).map((link) => bookTypes.find((type) => type.id === link.bookTypeId)).filter(Boolean).sort(sorter).map((type) => ({ id: type.id, name: type.name })) })); return { items, stats: { total: all.length, active: all.filter((q) => q.isActive).length, inactive: all.filter((q) => !q.isActive).length, inUse: answers.length } }; }
 async function presentQuestion(question) { return (await presentQuestions()).items.find((item) => item.id === question.id); }
 async function presentBookTypes() { const all = await list("bookTypes"); return Promise.all(all.sort((a, b) => Number(a.sortOrder || 1) - Number(b.sortOrder || 1) || a.name.localeCompare(b.name, "ko") || Number(a.id) - Number(b.id)).map((type) => presentBookType(type))); }
 async function presentBookType(type, detail = false) { const groups = await list("groups"); const links = await list("bookTypeGroups"); const questionLinks = await list("questionBookTypes"); const questions = await list("questions"); const selected = links.filter((l) => l.bookTypeId === type.id).map((l) => groups.find((g) => g.id === l.questionGroupId)).filter(Boolean).sort(sorter); const result = { ...type, questionGroupIds: selected.map((g) => g.id), questionGroups: selected, questionCount: questions.filter((q) => q.isActive && questionLinks.some((link) => link.questionId === q.id && link.bookTypeId === type.id)).length }; return detail ? { ...result, questions: questions.filter((q) => q.isActive && questionLinks.some((link) => link.questionId === q.id && link.bookTypeId === type.id)).sort(sorter) } : result; }
@@ -1293,13 +1315,45 @@ async function presentUserGifts(userId) {
   }));
   return rows.filter(Boolean);
 }
-async function presentBook(book, detail = false) { const type = await get("bookTypes", book.bookTypeId); const answers = (await list("answers")).filter((a) => a.myBookId === book.id); const publication = (await list("publications")).filter((item) => item.myBookId === book.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).at(-1); const done = answers.filter((a) => a.isFinal || a.answer.trim()).length; const result = { ...book, bookTypeName: type?.name || "알 수 없는 북타입", coverImage: publication?.coverImage || type?.coverImage || "classic", coverImageSelected: Boolean(publication?.coverImage), coverColor: publication?.coverColor || type?.coverColor, coverColorSelected: Boolean(publication?.coverColor), textColor: type?.textColor, coverStyle: publication?.coverStyle || "classic", totalQuestions: answers.length, completedQuestions: done, progress: answers.length ? Math.round(done / answers.length * 100) : 0 }; result.coverImageUrl = publicCoverImageUrl(result.coverImage); return detail ? { ...result, outline: await bookOutline(book) } : result; }
-async function bookOutline(book) { const [groups, questions, answers] = await Promise.all([list("groups"), list("questions"), list("answers")]); const ownAnswers = answers.filter((a) => a.myBookId === book.id); const items = ownAnswers.map((a) => ({ ...a, question: questions.find((q) => q.id === a.questionId) })).filter((a) => a.question); const outline = groups.sort(sorter).map((group) => ({ ...group, imageUrl: group.imagePath?.startsWith("data:") ? group.imagePath : publicHomeBannerUrl(group.imagePath), questions: items.filter((item) => item.question.questionGroupId === group.id).sort((a, b) => sorter(a.question, b.question)).map((item) => ({ ...item.question, answerId: item.id, answer: item.answer, isFinal: item.isFinal, updatedAt: item.updatedAt })) })).filter((group) => group.questions.length); const total = items.length; const completed = items.filter((a) => a.isFinal || a.answer.trim()).length; return { groups: outline, total, completed, progress: total ? Math.round(completed / total * 100) : 0 }; }
+function parseStructuredAnswer(answer) {
+  try {
+    const value = JSON.parse(String(answer || ""));
+    return value && Array.isArray(value.items) ? value.items : null;
+  } catch {
+    return null;
+  }
+}
+function answerHasContent(answer) {
+  const items = parseStructuredAnswer(answer);
+  if (items) return items.some((item) => String(item?.value || "").trim());
+  return Boolean(String(answer || "").trim());
+}
+function renderPreviewSegmentedAnswer(answer) {
+  const items = parseStructuredAnswer(answer);
+  if (!items) return '<div class="book-output-segmented-answer" aria-label="답변"></div>';
+  return `<div class="book-output-segmented-answer" aria-label="답변">${items.map((item) => `<div class="book-output-segmented-item"><div class="question-template-copy">${escapeHtml(item?.title || "")}</div><div class="book-template-segmented-input book-output-segmented-value" role="textbox" aria-readonly="true">${escapeHtml(String(item?.value || ""))}</div></div>`).join("")}</div>`;
+}
+function renderPreviewReference(question) {
+  const config = question?.templateConfig && typeof question.templateConfig === "object" ? question.templateConfig : {};
+  const imageUrl = String(config.imageUrl || "").trim();
+  if (!imageUrl) return "";
+  return `<div class="book-output-reference"><img src="${escapeHtml(imageUrl)}" alt="질문 참고 이미지"></div>`;
+}
+function renderPreviewStructuredAnswer(answer, question) {
+  const items = parseStructuredAnswer(answer);
+  if (!items) return '<div class="book-output-structured-answer" aria-label="답변"></div>';
+  const reference = question?.templateType === "short-answer-image" ? renderPreviewReference(question) : "";
+  return `<div class="book-output-structured-answer" aria-label="답변">${items.map((item) => `<div class="book-output-structured-item"><h3>${escapeHtml(item?.title || "")}</h3><p>${escapeHtml(String(item?.value || ""))}</p></div>`).join("")}${reference}</div>`;
+}
+async function presentBook(book, detail = false) { const type = await get("bookTypes", book.bookTypeId); const answers = (await list("answers")).filter((a) => a.myBookId === book.id); const publication = (await list("publications")).filter((item) => item.myBookId === book.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).at(-1); const done = answers.filter((a) => a.isFinal || answerHasContent(a.answer)).length; const result = { ...book, bookTypeName: type?.name || "알 수 없는 북타입", coverImage: publication?.coverImage || type?.coverImage || "classic", coverImageSelected: Boolean(publication?.coverImage), coverColor: publication?.coverColor || type?.coverColor, coverColorSelected: Boolean(publication?.coverColor), textColor: type?.textColor, coverStyle: publication?.coverStyle || "classic", totalQuestions: answers.length, completedQuestions: done, progress: answers.length ? Math.round(done / answers.length * 100) : 0 }; result.coverImageUrl = publicCoverImageUrl(result.coverImage); return detail ? { ...result, outline: await bookOutline(book) } : result; }
+async function bookOutline(book) { const [groups, questions, answers] = await Promise.all([list("groups"), list("questions"), list("answers")]); const ownAnswers = answers.filter((a) => a.myBookId === book.id); const items = ownAnswers.map((a) => ({ ...a, question: questions.find((q) => q.id === a.questionId) })).filter((a) => a.question); const outline = groups.sort(sorter).map((group) => ({ ...group, imageUrl: group.imagePath?.startsWith("data:") ? group.imagePath : publicHomeBannerUrl(group.imagePath), questions: items.filter((item) => item.question.questionGroupId === group.id).sort((a, b) => sorter(a.question, b.question)).map((item) => ({ ...item.question, answerId: item.id, answer: item.answer, isFinal: item.isFinal, updatedAt: item.updatedAt })) })).filter((group) => group.questions.length); const total = items.length; const completed = items.filter((a) => a.isFinal || answerHasContent(a.answer)).length; return { groups: outline, total, completed, progress: total ? Math.round(completed / total * 100) : 0 }; }
 
-async function validateQuestion(body) { if (!String(body.content || "").trim()) return "질문 내용을 입력하세요."; if (!Number.isInteger(Number(body.sortOrder)) || Number(body.sortOrder) < 1) return "질문 순서는 1 이상의 숫자여야 합니다."; if (!(await get("groups", Number(body.questionGroupId)))) return "질문그룹을 선택하세요."; if (!Array.isArray(body.bookTypeIds) || !body.bookTypeIds.length) return "하나 이상의 북타입을 선택하세요."; const types = await list("bookTypes"); if (body.bookTypeIds.some((id) => !types.some((type) => type.id === Number(id)))) return "유효하지 않은 북타입입니다."; return null; }
+async function validateQuestion(body) { if (!String(body.content || "").trim()) return "질문 내용을 입력하세요."; if (!Number.isInteger(Number(body.sortOrder)) || Number(body.sortOrder) < 1) return "질문 순서는 1 이상의 숫자여야 합니다."; if (!(await get("groups", Number(body.questionGroupId)))) return "질문그룹을 선택하세요."; if (!Array.isArray(body.bookTypeIds) || !body.bookTypeIds.length) return "하나 이상의 북타입을 선택하세요."; const types = await list("bookTypes"); if (body.bookTypeIds.some((id) => !types.some((type) => type.id === Number(id)))) return "유효하지 않은 북타입입니다."; const templateType = normalizeQuestionTemplate(body.templateType); const subtitles = normalizeQuestionSubtitles(body.shortAnswerTitles); if (["short-answer", "short-answer-image"].includes(templateType) && subtitles.length < 2) return "짧은 답변형은 소타이틀을 2개 이상 입력하세요."; if (templateType === "segmented" && subtitles.length < 2) return "구분 답변형은 소타이틀을 2개 입력하세요."; if (["image", "short-answer-image"].includes(templateType) && !String(body.imageUrl || "").trim()) return "참고 이미지를 입력하세요."; return null; }
 function validateGroup(body, groups, id) { if (!String(body.name || "").trim()) return "그룹명을 입력하세요."; if (!Number.isInteger(Number(body.sortOrder)) || Number(body.sortOrder) < 1) return "정렬순서는 1 이상의 숫자여야 합니다."; if (groups.some((g) => g.id !== id && g.name === body.name.trim())) return "이미 등록된 그룹명입니다."; return null; }
 async function validateBookType(body, id) { if (!String(body.name || "").trim()) return "책 제목을 입력하세요."; if (!Number.isInteger(Number(body.sortOrder)) || Number(body.sortOrder) < 1) return "노출 순서는 1 이상의 숫자여야 합니다."; if (!/^#[0-9a-fA-F]{6}$/.test(String(body.coverColor || "#00BC3C"))) return "표지 색상을 지정하세요."; if (!/^#[0-9a-fA-F]{6}$/.test(String(body.textColor || "#FFFFFF"))) return "텍스트 색상을 지정하세요."; if (!Array.isArray(body.questionGroupIds) || !body.questionGroupIds.length) return "하나 이상의 질문그룹을 선택하세요."; if ((await list("bookTypes")).some((t) => t.id !== id && t.name === body.name.trim())) return "이미 등록된 책 제목입니다."; const groups = await list("groups"); if (body.questionGroupIds.some((groupId) => !groups.some((g) => g.id === Number(groupId)))) return "유효하지 않은 질문그룹입니다."; return null; }
-function normalQuestion(body) { return { content: body.content.trim(), description: String(body.description || "").trim(), questionGroupId: Number(body.questionGroupId), sortOrder: Number(body.sortOrder) || 1, isActive: body.isActive !== false && body.isActive !== "false" }; }
+function normalizeQuestionTemplate(value) { const type = String(value || "basic"); return QUESTION_TEMPLATE_TYPES.has(type) ? type : "basic"; }
+function normalizeQuestionSubtitles(value) { return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : []; }
+function normalQuestion(body) { const templateType = normalizeQuestionTemplate(body.templateType); const subtitles = normalizeQuestionSubtitles(body.shortAnswerTitles); return { content: body.content.trim(), description: String(body.description || "").trim(), questionGroupId: Number(body.questionGroupId), sortOrder: Number(body.sortOrder) || 1, isActive: body.isActive !== false && body.isActive !== "false", templateType, templateConfig: { shortAnswerTitles: subtitles, imageGuidance: String(body.imageGuidance || "").trim(), imageUrl: String(body.imageUrl || "").trim() } }; }
 async function setQuestionBookTypes(questionId, typeIds = []) { await deleteWhere("questionBookTypes", (row) => row.questionId === Number(questionId)); for (const bookTypeId of [...new Set(typeIds.map(Number))]) await create("questionBookTypes", { questionId: Number(questionId), bookTypeId }); }
 async function questionIdsForType(typeId) { const links = await list("questionBookTypes"); return (await list("questions")).filter((q) => q.isActive && links.some((link) => link.questionId === q.id && link.bookTypeId === typeId)).sort(sorter).map((q) => q.id); }
 async function reorderQuestions(id, desiredOrder, questionGroupId, sourceQuestions = null) {
@@ -1360,7 +1414,7 @@ function buildBookOutputPages(details) {
     : { ...page, showPageNumber: false });
 }
 
-function renderBookOutputPage(page, number) {
+function renderBookOutputPage(page, number, preview = page.preview !== false) {
   const size = ` style="width:148mm;height:210mm;min-height:0;aspect-ratio:148 / 210"`;
   const pageNumber = page.showPageNumber ? `<span class="book-output-number">${page.pageNumber}</span>` : "";
   if (page.type === "title") return `<div class="book-output-page book-output-title" style="width:148mm;height:210mm;min-height:0;aspect-ratio:148 / 210"><div class="publish-book-cover" style="--cover-color:${/^#[0-9a-f]{6}$/i.test(page.coverColor || "") ? page.coverColor : "#FEAAE8"};--cover-scale:1.332"><div class="publish-cover-content"><p class="publish-cover-script">My Story</p><h2>${escapeHtml(page.title)}</h2><div class="publish-cover-bottom"><p class="publish-cover-fixed-copy">자세히 보고 오래보면 모두 어여쁜 인생입니다</p><p class="publish-cover-publisher">북촌꾸러미연구소</p></div></div><img data-cover-image src="${escapeHtml(page.coverImage)}" alt="선택한 표지 이미지"><small class="publish-cover-copyright">© 북촌꾸러미연구소, All rights reserved since 2025.</small></div>${pageNumber}</div>`;
@@ -1368,7 +1422,16 @@ function renderBookOutputPage(page, number) {
   if (page.type === "greeting") return `<div class="book-output-page book-output-greeting"${size}><div><h2>인사말</h2><p>${escapeHtml(page.introduction)}</p></div>${pageNumber}</div>`;
   if (page.type === "final") return `<div class="book-output-page book-output-final" style="--final-cover-color:${/^#[0-9a-f]{6}$/i.test(page.coverColor || "") ? page.coverColor : "#FEAAE8"}"${size}><p>남은 날들 동안 더없이 사랑하고 사랑받기를<br>북촌꾸러미연구소가 응원합니다.</p>${pageNumber}</div>`;
   if (page.type === "group") return `<div class="book-output-page book-output-group"${size}><div class="book-output-group-content">${page.imageUrl ? `<img src="${escapeHtml(page.imageUrl)}" alt="질문그룹 대표 이미지">` : ""}</div>${pageNumber}</div>`;
-  return `<div class="book-output-page book-output-question" data-output-question="true"${size}><div>${page.continuation ? "" : `<h2>${escapeHtml(page.question.content)}</h2>`}<p class="book-output-answer">${escapeHtml(page.answer)}</p></div>${pageNumber}</div>`;
+  const templateType = page.question?.templateType;
+  const structuredTemplate = ["short-answer", "short-answer-image", "segmented"].includes(templateType);
+  const answerMarkup = preview && templateType === "image"
+    ? `<div class="book-output-image-answer"><p class="book-output-answer">${escapeHtml(page.answer)}</p>${renderPreviewReference(page.question)}</div>`
+    : preview && templateType === "segmented"
+    ? renderPreviewSegmentedAnswer(page.answer)
+    : preview && structuredTemplate
+      ? renderPreviewStructuredAnswer(page.answer, page.question)
+      : `<p class="book-output-answer">${escapeHtml(page.answer)}</p>`;
+  return `<div class="book-output-page book-output-question" data-output-question="true"${size}><div>${page.continuation ? "" : `<h2>${escapeHtml(page.question.content)}</h2>`}${answerMarkup}</div>${pageNumber}</div>`;
 }
 
 async function renderBookOutput(req, res, id, print) {
@@ -1380,6 +1443,7 @@ async function renderBookOutput(req, res, id, print) {
   if (access.kind === "account" && !isAdminUser(access.user) && book.ownerId === access.user.id && (await list("gifts")).some((gift) => gift.bookId === book.id) && book.previewAllowed !== true) return sendText(res, 403, "미리보기가 허용되지 않은 선물입니다.");
   const details = await presentBook(book, true);
   const pages = buildBookOutputPages(details);
+  pages.forEach((page) => { page.preview = !print; });
   const body = `<style>@page{size:A5 portrait;margin:0}.book-output-answer{width:100%;height:calc(13 * 41.6px);margin:0;color:#b26d3b;font:700 16px/2.6 "Apple SD Gothic Neo",sans-serif;letter-spacing:-.64px;white-space:pre-wrap;word-break:keep-all;overflow-wrap:normal;overflow:hidden;background:repeating-linear-gradient(to bottom,transparent 0,transparent 40.6px,#eadfd8 40.6px,#eadfd8 41.6px);background-size:100% 41.6px;print-color-adjust:exact;-webkit-print-color-adjust:exact}.book-output-script{font-family:"Reenie Beanie",cursive;color:#FFFFFF}.book-output-fixed-copy{max-width:205px;margin:48px auto 0;color:#FFFFFF;font:400 12px/1.8 "Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;word-break:keep-all}.book-output-cover-image{display:block;width:100px;height:150px;margin:24px auto 0;object-fit:contain}.book-output-title h1{color:#363636}.book-output-publisher{margin:20px 0 0;color:#363636;font:700 13px/1.8 "Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif}.book-output-copyright{position:absolute;right:20px;bottom:74px;color:#FFFFFF;font:400 8px/1.4 "Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;text-align:right;writing-mode:vertical-rl;white-space:nowrap}</style>${pages.map((page, index) => renderBookOutputPage(page, index + 1)).join("")}`;
   const title = `${escapeHtml(book.title)}${print ? "" : " 미리보기"}`;
   const paginateScript = `<script>
@@ -1402,7 +1466,7 @@ async function renderBookOutput(req, res, id, print) {
       measure.remove();
       return Math.max(1, new Set(tops).size, String(text || "").split("\\n").length);
     }
-    function splitOutputAnswer(text, source) {
+    function splitOutputAnswer(text, source, lineLimit = OUTPUT_LINES_PER_PAGE) {
       let remaining = String(text || "미작성");
       const chunks = [];
       while (remaining.length) {
@@ -1411,7 +1475,7 @@ async function renderBookOutput(req, res, id, print) {
         let best = 0;
         while (low <= high) {
           const middle = Math.floor((low + high) / 2);
-          if (outputLineCount(remaining.slice(0, middle), source) <= OUTPUT_LINES_PER_PAGE) { best = middle; low = middle + 1; }
+          if (outputLineCount(remaining.slice(0, middle), source) <= lineLimit) { best = middle; low = middle + 1; }
           else high = middle - 1;
         }
         if (!best) best = 1;
@@ -1419,6 +1483,43 @@ async function renderBookOutput(req, res, id, print) {
         remaining = remaining.slice(best);
       }
       return chunks.length ? chunks : ["미작성"];
+    }
+    function splitStructuredAnswer(page) {
+      const answer = page.querySelector(".book-output-structured-answer");
+      if (!answer) return [];
+      const parts = [];
+      let current = [];
+      let usedLines = 0;
+      const flush = () => { if (current.length) parts.push(current); current = []; usedLines = 0; };
+      answer.querySelectorAll(":scope > .book-output-structured-item").forEach((item) => {
+        const title = item.querySelector(".question-template-copy, h3");
+        const value = item.querySelector(".book-output-segmented-value, p:not(.question-template-copy)");
+        if (!title || !value) return;
+        let remaining = value.textContent;
+        let first = true;
+        do {
+          const titleLines = outputLineCount(title.textContent, title);
+          const gapLines = current.length ? 1 : 0;
+          const available = Math.max(1, OUTPUT_LINES_PER_PAGE - usedLines - gapLines - titleLines);
+          const sourceText = remaining || " ";
+          const chunk = splitOutputAnswer(sourceText, value, available)[0];
+          const actualChunk = remaining ? chunk : "";
+          const valueLines = outputLineCount(actualChunk || " ", value);
+          const itemLines = gapLines + titleLines + valueLines;
+          if (current.length && usedLines + itemLines > OUTPUT_LINES_PER_PAGE) flush();
+          const clone = item.cloneNode(true);
+          const cloneValue = clone.querySelector(".book-output-segmented-value, p:not(.question-template-copy)");
+          cloneValue.textContent = actualChunk;
+          current.push(clone);
+          usedLines += (current.length > 1 ? 1 : 0) + titleLines + valueLines;
+          first = false;
+          if (!remaining || actualChunk.length >= remaining.length) break;
+          remaining = remaining.slice(actualChunk.length);
+          if (usedLines >= OUTPUT_LINES_PER_PAGE) flush();
+        } while (first || remaining.length);
+      });
+      flush();
+      return parts;
     }
     function paginateOutput() {
       document.querySelectorAll(".book-output-page[data-output-question]").forEach((page) => {
@@ -1433,6 +1534,26 @@ async function renderBookOutput(req, res, id, print) {
           const heading = next.querySelector("h2");
           if (index > 0) heading?.remove();
           next.querySelector(".book-output-answer").textContent = chunk;
+          if (index < chunks.length - 1) next.querySelector(".book-output-reference")?.remove();
+          fragment.append(next);
+        });
+        page.replaceWith(fragment);
+      });
+      document.querySelectorAll(".book-output-page[data-output-question]").forEach((page) => {
+        const structured = page.querySelector(".book-output-structured-answer");
+        if (!structured || page.dataset.paginated) return;
+        const chunks = splitStructuredAnswer(page);
+        if (chunks.length <= 1) { page.dataset.paginated = "true"; return; }
+        page.dataset.paginated = "true";
+        const fragment = document.createDocumentFragment();
+        chunks.forEach((items, index) => {
+          const next = page.cloneNode(true);
+          next.dataset.paginated = "true";
+          if (index > 0) next.querySelector("h2")?.remove();
+          const nextAnswer = next.querySelector(".book-output-structured-answer");
+          nextAnswer.replaceChildren(...items);
+          if (index > 0 && nextAnswer.classList.contains("book-output-segmented-answer")) nextAnswer.style.marginTop = "0";
+          if (index < chunks.length - 1) nextAnswer.querySelector(".book-output-reference")?.remove();
           fragment.append(next);
         });
         page.replaceWith(fragment);
@@ -1442,9 +1563,54 @@ async function renderBookOutput(req, res, id, print) {
         if (number) number.textContent = String(index + 1);
       });
     }
+    function outputContentBottom(page) {
+      const style = getComputedStyle(page);
+      return page.getBoundingClientRect().bottom - parseFloat(style.paddingBottom || "0");
+    }
+    function fitOutputReferenceImage(reference, page) {
+      const image = reference.querySelector("img");
+      if (!image || !image.complete || !image.naturalWidth) return false;
+      const imageRect = image.getBoundingClientRect();
+      const availableImageHeight = outputContentBottom(page) - imageRect.top;
+      image.style.maxHeight = String(Math.max(0, Math.min(180, availableImageHeight))) + "px";
+      return reference.getBoundingClientRect().bottom <= outputContentBottom(page) + 1;
+    }
+    function collapseImageAnswerSlot(page) {
+      const answer = page.querySelector(".book-output-image-answer > .book-output-answer");
+      if (!answer) return;
+      const style = getComputedStyle(answer);
+      const lineHeight = parseFloat(style.lineHeight) || 41.6;
+      const lines = outputLineCount(answer.textContent, answer);
+      answer.style.height = String(Math.max(1, lines) * lineHeight) + "px";
+    }
+    function moveOutputReferencesToNextPage() {
+      document.querySelectorAll(".book-output-page[data-output-question]").forEach((page) => {
+        const reference = page.querySelector(".book-output-reference");
+        if (!reference) return;
+        collapseImageAnswerSlot(page);
+        if (fitOutputReferenceImage(reference, page)) return;
+        const next = page.cloneNode(true);
+        next.dataset.paginated = "true";
+        next.querySelector("h2")?.remove();
+        next.querySelector(".book-output-answer")?.remove();
+        next.querySelectorAll(".book-output-structured-item").forEach((item) => item.remove());
+        page.querySelector(".book-output-reference")?.remove();
+        const nextReference = next.querySelector(".book-output-reference");
+        if (!nextReference) return;
+        page.after(next);
+        const nextImage = nextReference.querySelector("img");
+        const refit = () => fitOutputReferenceImage(nextReference, next);
+        if (nextImage && !nextImage.complete) nextImage.addEventListener("load", refit, { once: true });
+        requestAnimationFrame(refit);
+      });
+      document.querySelectorAll(".book-output-page[data-output-question]").forEach((page, index) => {
+        const number = page.querySelector(".book-output-number");
+        if (number) number.textContent = String(index + 1);
+      });
+    }
     const outputReady = document.fonts?.ready || Promise.resolve();
     const imagesReady = Promise.all([...document.images].map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); })));
-    Promise.all([outputReady, imagesReady]).then(() => { paginateOutput(); ${print ? "window.print();" : ""} });
+    Promise.all([outputReady, imagesReady]).then(() => { paginateOutput(); ${print ? "" : "moveOutputReferencesToNextPage();"} ${print ? "window.print();" : ""} });
   </script>`;
   sendHtml(res, `<!doctype html><html lang="ko"><meta charset="utf-8"><link rel="stylesheet" href="/app.css"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Reenie+Beanie&display=swap" rel="stylesheet"><title>${title}</title><style>
     @font-face{font-family:"KoPub Batang";src:url("/node_modules/@noonnu/ko-pub-batang/fonts/kopub-batang-400.woff2") format("woff2");font-weight:400}
@@ -1455,7 +1621,7 @@ async function renderBookOutput(req, res, id, print) {
 async function supabase(pathname, options = {}) { const response = await fetch(`${SUPABASE_URL}/rest/v1${pathname}`, { ...options, headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", ...(options.headers || {}) } }); if (!response.ok) throw new Error(`Supabase 오류: ${await response.text()}`); const text = await response.text(); return text ? JSON.parse(text) : []; }
 
 function groupMap(row) { return { id: row.id, name: row.name, description: row.description || "", imagePath: row.image_path || "", sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at }; } groupMap.from = groupMap; groupMap.to = (v) => fields(v, { name: "name", description: "description", imagePath: "image_path", sortOrder: "sort_order", updatedAt: "updated_at" });
-function questionMap(row) { return { id: row.id, content: row.content, description: row.description || "", questionGroupId: row.question_group_id, sortOrder: row.sort_order, isActive: row.is_active, createdAt: row.created_at, updatedAt: row.updated_at }; } questionMap.from = questionMap; questionMap.to = (v) => fields(v, { content: "content", description: "description", questionGroupId: "question_group_id", sortOrder: "sort_order", isActive: "is_active", updatedAt: "updated_at" });
+function questionMap(row) { return { id: row.id, content: row.content, description: row.description || "", questionGroupId: row.question_group_id, sortOrder: row.sort_order, isActive: row.is_active, templateType: row.template_type || "basic", templateConfig: row.template_config && typeof row.template_config === "object" ? row.template_config : {}, createdAt: row.created_at, updatedAt: row.updated_at }; } questionMap.from = questionMap; questionMap.to = (v) => fields(v, { content: "content", description: "description", questionGroupId: "question_group_id", sortOrder: "sort_order", isActive: "is_active", templateType: "template_type", templateConfig: "template_config", updatedAt: "updated_at" });
 function questionBookTypeMap(row) { return { id: row.id || `${row.question_id}-${row.book_type_id}`, questionId: row.question_id, bookTypeId: row.book_type_id }; } questionBookTypeMap.from = questionBookTypeMap; questionBookTypeMap.to = (v) => ({ question_id: v.questionId, book_type_id: v.bookTypeId });
 function bookTypeMap(row) { return { id: row.id, name: row.name, description: row.description || "", coverImage: row.cover_image || "classic", coverColor: row.cover_color || "#00BC3C", textColor: row.text_color || "#FFFFFF", sortOrder: row.sort_order || 1, isActive: row.is_active, createdAt: row.created_at, updatedAt: row.updated_at }; } bookTypeMap.from = bookTypeMap; bookTypeMap.to = (v) => fields(v, { name: "name", description: "description", coverImage: "cover_image", coverColor: "cover_color", textColor: "text_color", sortOrder: "sort_order", isActive: "is_active", updatedAt: "updated_at" });
 function linkMap(row) { return { id: row.id || `${row.book_type_id}-${row.question_group_id}`, bookTypeId: row.book_type_id, questionGroupId: row.question_group_id }; } linkMap.from = linkMap; linkMap.to = (v) => ({ book_type_id: v.bookTypeId, question_group_id: v.questionGroupId });

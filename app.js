@@ -56,10 +56,36 @@ const homeData = {
   },
 };
 
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", handleWritingHashChange);
+document.addEventListener("click", onStepTabClick);
 document.addEventListener("click", onClick);
 let writingSwipeStart = null;
 let writingMouseSwipeStart = null;
+let writingAnswerState = null;
+let writingSavePromise = null;
+let writingNavigationPromise = null;
+async function handleWritingHashChange(event) {
+  if (!writingAnswerState || !document.body.classList.contains("book-detail-route") || !event?.newURL) return render();
+  if (!isWritingHash(event.newURL)) return (await saveCurrentAnswerBeforeLeave()) ? render() : history.replaceState(null, "", event.oldURL);
+  return (await saveCurrentAnswerBeforeLeave()) ? render() : history.replaceState(null, "", event.oldURL);
+}
+function isWritingHash(url) { return /#book\/\d+(?:\/|$)/.test(url); }
+function requestWritingNavigation(targetHash) {
+  if (writingNavigationPromise) return writingNavigationPromise;
+  writingNavigationPromise = (async () => { if (await saveCurrentAnswerBeforeLeave()) { if (location.hash !== targetHash) location.hash = targetHash; } })().finally(() => { writingNavigationPromise = null; });
+  return writingNavigationPromise;
+}
+function handleWritingNavigationClick(event) {
+  if (!document.body.classList.contains("book-detail-route")) return;
+  const button = event.target.closest(".book-question-list [data-book-page]");
+  const link = event.target.closest(".book-writing-navigation a");
+  const targetHash = button ? `#book/${location.hash.split("/")[1]}/${button.dataset.bookPage}` : link?.getAttribute("href");
+  if (!targetHash || !targetHash.startsWith("#book/")) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  requestWritingNavigation(targetHash);
+}
+document.addEventListener("click", handleWritingNavigationClick, true);
 function handleWritingSwipe(start, endX, endY) {
   if (!start || !window.matchMedia("(max-width: 760px)").matches || !document.body.classList.contains("book-detail-route") || !start.panel.isConnected) return;
   const dx = endX - start.x;
@@ -144,6 +170,7 @@ document.addEventListener("submit", onSubmit);
 document.addEventListener("submit", onProfileSubmit, true);
 document.addEventListener("input", onInput);
 document.addEventListener("change", onChange);
+window.addEventListener("resize", resizeAllTemplateAnswerInputs);
 const authorMomentDeleteObserver = new MutationObserver(() => {
   app.querySelectorAll(".author-moment-item").forEach((item) => {
     if (item.querySelector("[data-author-delete]")) return;
@@ -641,7 +668,7 @@ function syncBookQuestionScroll(previousScrollLeft = null) {
     if (nextLeft !== list.scrollLeft) list.scrollTo({ left: nextLeft, behavior: "smooth" });
   });
 }
-function createSteps(active) { const labels = ["북타입 선택", "기본정보", "안내", "질문생성"]; return `<div class="steps create-steps">${labels.map((label, index) => `${index ? "<i></i>" : ""}<span class="${active === index + 1 ? "active" : ""}">0${index + 1} ${label}</span>`).join("")}</div>`; }
+function createSteps(active) { const labels = ["북타입 선택", "기본정보", "안내", "질문생성"]; return `<div class="steps create-steps">${labels.map((label, index) => `${index ? "<i></i>" : ""}<span class="${active === index + 1 ? "active" : ""}" data-create-step="${index + 1}" role="button" tabindex="0">0${index + 1} ${label}</span>`).join("")}</div>`; }
 function bookCard(b) { const design = bookTypeDesign(b); return `<article class="my-book-card book-card" data-go="book/${b.id}"><span class="my-book-status ${b.status === "published" ? "published" : ""}">${b.status === "published" ? "출판완료" : `작성중 <em>${b.progress}%</em>`}</span><div class="my-book-main"><div class="my-book-title"><p class="my-book-script">My Story</p><p class="my-book-name">${escapeHtml(b.title)}</p></div><div class="my-book-from-to"><strong>${escapeHtml(b.sender || "보내는 사람이")}(이)가</strong><img src="/assets/home-category-line.svg" alt="" aria-hidden="true"><strong>${escapeHtml(b.receiver || "받는 사람")}에게</strong></div></div><div class="my-book-illustration"><img src="/assets/${design.image}" alt="${escapeHtml(b.bookTypeName)} 유형 일러스트"></div></article>`; }
 function giftBookCard(b) { return `<article class="gift-book-card" data-go="book/${b.id}" style="background-color:${escapeHtml(b.coverColor || "")}"><span class="gift-book-status ${b.status === "published" ? "published" : ""}">${b.status === "published" ? "출판완료" : `작성중 <em>${b.progress}%</em>`}</span><div class="gift-book-main"><div class="gift-book-title"><p class="gift-book-script">My Story</p><p class="gift-book-name">${escapeHtml(b.title)}</p></div><div class="gift-book-from-to"><strong>${escapeHtml(b.sender || "보내는 사람이")}(이)가</strong><img src="/assets/home-category-line.svg" alt="" aria-hidden="true"><strong>${escapeHtml(b.receiver || "받는 사람")}에게</strong></div></div><div class="gift-book-cover"><img src="${escapeHtml(b.coverImageUrl || "")}" alt="${escapeHtml(b.title)} 표지"></div></article>`; }
 
@@ -651,11 +678,25 @@ async function create() {
   else if (state.createStep === 2) { const isSelf = state.bookDraft?.isSelf === true; app.innerHTML = `<section class="create-page create-flow create-basic-page"><div class="create-intro create-basic-intro"><p class="create-kicker">나의 이야기를 위한 정보</p><h1>책의 기본정보를 입력해 주세요.</h1><p>책에 담길 이름과 인사말을 차분히 적어 주세요.</p></div>${createSteps(2)}<form id="create-basic-form" class="form create-basic-form" data-form="create-book"><label class="create-basic-field"><span class="guide_02">책 제목</span><input name="title" value="${escapeHtml(state.bookDraft?.title || "")}" placeholder="${DEFAULT_BOOK_TITLE}"></label><label class="create-basic-field"><span class="guide_02">보내는 사람${isSelf ? "" : ' <sup class="required-mark">*</sup>'}</span><input name="sender" value="${escapeHtml(state.bookDraft?.sender || "")}" placeholder="이름 (딸, 가을)" ${isSelf ? "" : "required"}></label><label class="create-basic-field"><span class="guide_02">받는 사람${isSelf ? "" : ' <sup class="required-mark">*</sup>'}</span><input name="receiver" value="${escapeHtml(state.bookDraft?.receiver || "")}" placeholder="이름 (엄마, 이겨울)" ${isSelf ? "" : "required"}></label><label class="create-basic-field"><span class="guide_02">인사말</span><textarea name="introduction" placeholder="${DEFAULT_RECIPIENT_MESSAGE}">${escapeHtml(state.bookDraft?.introduction || "")}</textarea></label><label class="create-basic-self"><input type="checkbox" name="isSelf" data-self-book ${isSelf ? "checked" : ""}><span>내가 나에게</span></label></form><div class="create-basic-actions actions"><button type="button" class="button ghost" data-create-back>이전</button><button type="submit" form="create-basic-form" class="button primary">다음 →</button></div></section>`; }
   else if (state.createStep === 3) app.innerHTML = `<section class="create-page create-flow create-info-page"><div class="create-intro"><p class="create-kicker">작성 전에 확인해 주세요</p><h1>당신의 속도로 이야기를 시작하세요.</h1><p>완벽한 답보다, 지금 떠오르는 기억을 남기는 것이 더 중요합니다.</p></div>${createSteps(3)}<div class="create-info-list"><section><h2>작성 방법</h2><p>정답은 없습니다. 기억나는 만큼 자유롭게 작성해 주세요.</p></section><section><h2>저장 방법</h2><p>작성 중인 답변은 30초마다 자동 저장되며, 저장 버튼으로 직접 저장할 수도 있습니다.</p></section><section><h2>개인정보</h2><p>작성 내용은 나의 책에만 저장됩니다.</p></section><div class="actions"><button class="button ghost" data-create-back>이전</button><button class="button primary" data-next-create>다음 →</button></div></div></section>`;
   else { const type = types.find(t => t.id === state.createType); const design = bookTypeDesign(type); app.innerHTML = `<section class="create-page create-flow create-outline-page"><div class="create-intro"><p class="create-kicker">나의 이야기 목차</p><h1>질문을 확인하고 책을 시작하세요.</h1><p>선택한 질문은 책을 만든 뒤에도 답변을 작성하며 확인할 수 있습니다.</p></div>${createSteps(4)}<div class="create-outline"><div class="create-outline-content"><div class="outline-thumbnail-column"><div class="outline-thumbnail"><span class="thumbnail-title">My Story</span><span class="thumbnail-type">${escapeHtml(type.name)}</span><img src="/assets/${design.image}" alt="${escapeHtml(type.name)} 유형 일러스트"></div><p class="outline-thumbnail-summary">선택한 질문그룹 ${type.questionGroups.length}개 · 총 ${type.questionCount}개의 질문</p></div><div class="outline-groups">${type.questionGroups.map((g, index) => `<section class="outline-group"><h3><span>${String(index + 1).padStart(2, "0")}</span><span>${escapeHtml(g.name)}</span></h3></section>`).join("")}<div class="actions"><button class="button ghost" data-create-back>이전</button><button class="button primary" data-create-confirm>이 질문으로 책 만들기 →</button></div></div></div></div></section>`; }
+  queueMicrotask(moveSelfBookToggle);
+}
+
+function moveSelfBookToggle() {
+  if (state.createStep === 1) { const steps = document.querySelector(".create-page > .steps"); if (steps && !steps.querySelector("[data-create-step]")) steps.outerHTML = createSteps(1); }
+  const form = document.querySelector("#create-basic-form");
+  const toggle = form?.querySelector(".create-basic-self");
+  const senderGuide = form?.querySelectorAll(".create-basic-field .guide_02")?.[1];
+  if (!toggle || !senderGuide) return;
+  const control = document.createElement("span");
+  control.className = "create-basic-self";
+  control.append(...toggle.childNodes);
+  toggle.replaceWith(control);
+  senderGuide.append(control);
 }
 
 function giftSteps(active) {
   const labels = ["북타입 선택", "기본정보", "표지", "보내기"];
-  return `<div class="steps create-steps gift-create-steps">${labels.map((label, index) => `${index ? "<i></i>" : ""}<span class="${active === index + 1 ? "active" : ""}">0${index + 1} ${label}</span>`).join("")}</div>`;
+  return `<div class="steps create-steps gift-create-steps">${labels.map((label, index) => `${index ? "<i></i>" : ""}<span class="${active === index + 1 ? "active" : ""}" data-gift-step="${index + 1}" role="button" tabindex="0">0${index + 1} ${label}</span>`).join("")}</div>`;
 }
 
 async function giftCreate() {
@@ -768,6 +809,33 @@ async function shareGift(method) {
   } catch (error) { if (error.name !== "AbortError") toastMsg(error.message || "선물 전달 정보를 만들지 못했습니다."); }
 }
 
+function parseStructuredAnswer(answer) { try { const value = JSON.parse(String(answer || "")); return value && Array.isArray(value.items) ? value.items : null; } catch { return null; } }
+function answerHasContent(answer) { const items = parseStructuredAnswer(answer); return items ? items.some((item) => String(item?.value || "").trim()) : Boolean(String(answer || "").trim()); }
+function questionTemplateType(question) { return ["basic", "short-answer", "image", "short-answer-image", "segmented"].includes(question?.templateType) ? question.templateType : "basic"; }
+function questionTemplateConfig(question) { return question?.templateConfig && typeof question.templateConfig === "object" ? question.templateConfig : {}; }
+function questionTemplateTitles(question) { const titles = questionTemplateConfig(question).shortAnswerTitles; return Array.isArray(titles) && titles.length ? titles : ["", ""]; }
+function templateAnswerItems(question) { const saved = parseStructuredAnswer(question?.answer); const titles = questionTemplateTitles(question); return titles.map((title, index) => ({ key: String(index), title, value: String(saved?.find((item) => String(item?.key) === String(index))?.value || "") })); }
+function questionReferenceImageUrl(question) { const value = String(questionTemplateConfig(question).imageUrl || "").trim(); if (!value || /instagram\.com\/p\//i.test(value)) return ""; return /^(https?:\/\/|\/|data:image\/)/i.test(value) ? value : ""; }
+function renderTemplateAnswer(question) {
+  const type = questionTemplateType(question);
+  const config = questionTemplateConfig(question);
+  const imageUrl = questionReferenceImageUrl(question);
+  const image = ["image", "short-answer-image"].includes(type) && imageUrl ? `<div class="book-template-reference"><p class="question-template-copy">${escapeHtml(config.imageGuidance || "")}</p><img src="${escapeHtml(imageUrl)}" alt="질문 참고 이미지" loading="lazy"></div>` : "";
+  const shortAnswerClass = ["short-answer", "short-answer-image"].includes(type) ? " book-template-short-answer-content" : "";
+  if (type === "short-answer" || type === "short-answer-image") return `<div class="book-template-answer-content${shortAnswerClass}"><div class="book-template-short-grid">${templateAnswerItems(question).map((item) => `<label class="book-template-short-box"><span class="question-template-copy">${escapeHtml(item.title)}</span><textarea class="book-template-answer-input book-template-short-input" data-template-answer-index="${item.key}" aria-label="${escapeHtml(item.title || `짧은 답변 ${Number(item.key) + 1}`)}">${escapeHtml(item.value)}</textarea></label>`).join("")}</div>${image}</div>`;
+  if (type === "segmented") return `<div class="book-template-answer-content"><div class="book-template-segmented">${templateAnswerItems(question).slice(0, 2).map((item) => `<label><span class="question-template-copy">${escapeHtml(item.title)}</span><span class="book-template-segmented-input-wrap"><textarea class="book-template-answer-input book-template-segmented-input" data-template-answer-index="${item.key}" aria-label="${escapeHtml(item.title || `답변 ${Number(item.key) + 1}`)}">${escapeHtml(item.value)}</textarea><span class="book-template-segmented-input-measure" aria-hidden="true"></span></span></label>`).join("")}</div></div>`;
+  return image ? `<div class="book-template-answer-content"><textarea id="answerInput" class="book-answer-input" placeholder="기억나는 이야기를 자유롭게 적어 주세요.">${escapeHtml(question?.answer || "")}</textarea>${image}</div>` : `<textarea id="answerInput" class="book-answer-input" placeholder="기억나는 이야기를 자유롭게 적어 주세요.">${escapeHtml(question?.answer || "")}</textarea>`;
+}
+function currentWritingAnswerValue() {
+  if (writingAnswerState?.multi) return JSON.stringify({ items: [...document.querySelectorAll("[data-template-answer-index]")].map((input) => ({ key: String(input.dataset.templateAnswerIndex), title: input.closest("label")?.querySelector("span")?.textContent || "", value: input.value })) });
+  return document.querySelector("#answerInput")?.value || "";
+}
+function resizeSegmentedAnswerInput(input) { const wrapper = input.closest(".book-template-segmented-input-wrap"); const measure = wrapper?.querySelector(".book-template-segmented-input-measure"); const parent = wrapper?.parentElement; if (!wrapper || !measure || !parent) return; measure.textContent = input.value || "\u00a0"; const parentWidth = parent.clientWidth; if (parentWidth) { const minWidth = parentWidth * 0.3; const maxWidth = parentWidth; const contentWidth = measure.getBoundingClientRect().width + 80; wrapper.style.width = `${Math.min(maxWidth, Math.max(minWidth, contentWidth))}px`; } input.style.height = "auto"; input.style.flex = "0 0 auto"; input.style.height = `${input.scrollHeight}px`; resizeSegmentedAnswerLayout(input.closest(".book-template-segmented")); }
+function resizeSegmentedAnswerLayout(segment) { if (!segment) return; const labels = [...segment.querySelectorAll(":scope > label")]; const requiredHeight = labels.reduce((height, label) => height + label.querySelector(":scope > span:first-child")?.offsetHeight + 12 + label.querySelector(".book-template-segmented-input")?.offsetHeight, 0) + Math.max(0, labels.length - 1) * 20; segment.style.minHeight = `${Math.max(420 - 60, requiredHeight)}px`; const answerContent = segment.closest(".book-template-answer-content"); if (answerContent) answerContent.style.minHeight = `${Math.max(420, requiredHeight + 60)}px`; }
+function resizeShortAnswerInput(input) { input.style.height = "auto"; input.style.height = `${Math.max(input.scrollHeight, 3 * parseFloat(getComputedStyle(input).lineHeight || "41.6"))}px`; }
+function resizeAllTemplateAnswerInputs() { document.querySelectorAll(".book-template-segmented-input").forEach(resizeSegmentedAnswerInput); document.querySelectorAll(".book-template-short-input").forEach(resizeShortAnswerInput); }
+function initWritingAnswerState(bookId, question) { const multi = ["short-answer", "short-answer-image", "segmented"].includes(questionTemplateType(question)); writingAnswerState = { bookId, questionId: question.id, multi, savedValue: multi ? JSON.stringify({ items: templateAnswerItems(question) }) : question.answer || "", dirty: false }; resizeAllTemplateAnswerInputs(); }
+
 async function book(id, selectedPage = null) {
   const bookRenderId = state.renderId;
   const previousQuestionList = app.querySelector(".book-question-list");
@@ -785,12 +853,12 @@ async function book(id, selectedPage = null) {
   const selected = page?.type === "question" ? page.question : null;
   if (!page) { app.innerHTML = `<div class="panel empty">이 책에 등록된 질문이 없습니다.</div>`; return; }
   if (selected) rememberBookQuestion(id, selected.id);
-  const groupCounts = new Map(b.outline.groups.map(g => [g.id, { total: g.questions.length, done: g.questions.filter(q => q.answer.trim() || q.isFinal).length }]));
+  const groupCounts = new Map(b.outline.groups.map(g => [g.id, { total: g.questions.length, done: g.questions.filter(q => answerHasContent(q.answer) || q.isFinal).length }]));
   const groupList = b.outline.groups.map(group => {
     const count = groupCounts.get(group.id);
     const groupFilled = count.done > 0;
     const docs = group.questions.map(q => {
-      const filled = Boolean(q.answer.trim() || q.isFinal);
+      const filled = Boolean(answerHasContent(q.answer) || q.isFinal);
       const active = selected?.id === q.id;
       const icon = filled ? (active ? "doc_filledActive.svg" : "doc_filled.svg") : (active ? "doc_blankActive.svg" : "doc_blank.svg");
       return `<button class="book-question-icon" type="button" data-book-page="question-${q.id}" aria-label="${escapeHtml(q.content)}" aria-current="${active ? "page" : "false"}"><img src="/assets/${icon}" alt=""></button>`;
@@ -802,7 +870,7 @@ async function book(id, selectedPage = null) {
   const previous = pages[selectedIndex - 1]; const next = pages[selectedIndex + 1];
   const updated = selected?.updatedAt ? new Date(selected.updatedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "";
   const groupHeightReference = page.type === "group" ? page.group.questions[0] : null;
-  const writingContent = page.type === "group" ? `<div class="book-group-height-reference" aria-hidden="true"><div class="book-writing-question"><span>01</span><h2>${escapeHtml(groupHeightReference.content)}</h2>${groupHeightReference.description ? `<p>${escapeHtml(groupHeightReference.description)}</p>` : ""}</div><span class="book-writing-save-state">저장되지 않음</span><textarea class="book-answer-input">${escapeHtml(groupHeightReference.answer)}</textarea><div class="book-writing-footer"><p>30초마다 자동 저장됩니다. 사진·음성·동영상 첨부는 다음 버전에서 제공됩니다.</p><button class="button small" type="button">저장</button></div></div><div class="book-group-divider-page">${page.group.imageUrl ? `<img src="${escapeHtml(page.group.imageUrl)}" alt="${escapeHtml(page.group.name)} 대표 이미지">` : ""}</div>` : `<div class="book-writing-question"><span>${questionNumber}</span><h2>${escapeHtml(selected.content)}</h2>${selected.description ? `<p>${escapeHtml(selected.description)}</p>` : ""}</div><span id="saveState" class="book-writing-save-state">${updated ? `저장됨 ${updated}` : "저장되지 않음"}</span><textarea id="answerInput" class="book-answer-input" placeholder="기억나는 이야기를 자유롭게 적어 주세요.">${escapeHtml(selected.answer)}</textarea><div class="book-writing-footer"><p>30초마다 자동 저장됩니다. 사진·음성·동영상 첨부는 다음 버전에서 제공됩니다.</p><button class="button small" type="button" data-save-inline-answer="true">저장</button></div>`;
+  const writingContent = page.type === "group" ? `<div class="book-group-height-reference" aria-hidden="true"><div class="book-writing-question"><span>01</span><h2>${escapeHtml(groupHeightReference.content)}</h2>${groupHeightReference.description ? `<p>${escapeHtml(groupHeightReference.description)}</p>` : ""}</div><span class="book-writing-save-state">저장되지 않음</span><textarea class="book-answer-input">${escapeHtml(groupHeightReference.answer)}</textarea><div class="book-writing-footer"><p>작성내용은 자동저장됩니다. 사진·음성 첨부는 다음버전에서 제공됩니다.</p><button class="button small" type="button">저장</button></div></div><div class="book-group-divider-page">${page.group.imageUrl ? `<img src="${escapeHtml(page.group.imageUrl)}" alt="${escapeHtml(page.group.name)} 대표 이미지">` : ""}</div>` : `<div class="book-writing-question"><span>${questionNumber}</span><h2>${escapeHtml(selected.content)}</h2>${selected.description ? `<p>${escapeHtml(selected.description)}</p>` : ""}</div><span id="saveState" class="book-writing-save-state">${updated ? `저장됨 ${updated}` : "저장되지 않음"}</span>${renderTemplateAnswer(selected)}<div class="book-writing-footer"><p>작성내용은 자동저장됩니다. 사진·음성 첨부는 다음버전에서 제공됩니다.</p><button class="button small" type="button" data-save-inline-answer="true">저장</button></div>`;
   const cover = bookTypeDesign({ name: b.bookTypeName, coverImage: b.coverImage }).image;
   app.innerHTML = `<section class="book-detail-page ${state.bookWritingFull ? "book-writing-full" : ""}">
     <div class="book-detail-head"><div class="book-detail-info"><a class="book-back" href="#books">← 내 이야기 목록</a><div class="book-detail-title-actions"><h1>${escapeHtml(b.title)}</h1> <button class="book-detail-edit" type="button" data-open-book-info="${b.id}">📝 기본정보 수정하기</button></div></div><div class="book-detail-illustration"><img src="/assets/${cover}" alt="${escapeHtml(b.bookTypeName)} 유형 일러스트"><span>${b.status === "published" ? "출판완료" : "작성중"}</span></div></div>
@@ -810,12 +878,16 @@ async function book(id, selectedPage = null) {
     <div class="book-writing-layout"><aside class="book-question-list">${groupList}</aside><section class="book-writing-panel"><div class="book-writing-tools"><button class="book-writing-view-toggle" type="button" data-notewindow-toggle aria-label="${state.bookWritingFull ? "전체보기" : "작성영역만 보기"}" aria-pressed="${state.bookWritingFull}"><img src="/assets/${state.bookWritingFull ? "notewindow_dashboard.svg" : "notewindow_full.svg"}" alt=""></button></div><div class="book-writing-content${page.type === "group" ? " book-writing-group-content" : ""}">${writingContent}</div><div class="book-writing-navigation">${previous ? `<a href="#book/${b.id}/${previous.type === "group" ? `group-${previous.groupId}` : `question-${previous.questionId}`}" aria-label="이전 ${previous.type === "group" ? "질문그룹" : "질문"}"><img src="/assets/arrow_previous_1.svg" alt="이전 페이지"></a>` : `<span></span>`}${next ? `<a href="#book/${b.id}/${next.type === "group" ? `group-${next.groupId}` : `question-${next.questionId}`}" aria-label="다음 ${next.type === "group" ? "질문그룹" : "질문"}"><img src="/assets/arrow_next_1.svg" alt="다음 페이지"></a>` : `<span></span>`}</div></section></div>
   </section>`;
   syncBookQuestionScroll(previousScrollLeft);
+  if (selected) initWritingAnswerState(id, selected); else writingAnswerState = null;
+  updateAutoSaveNotice();
   if (selected) state.autoSave = setInterval(() => saveAnswer(b.id, selected.id, false, true), 30000);
 }
 
 async function write(bookId, questionId) {
   const b = await api(`/api/books/${bookId}`); const all = b.outline.groups.flatMap(g => g.questions); const index = all.findIndex(q => q.id === questionId); const q = all[index]; if (!q) throw new Error("질문을 찾을 수 없습니다.");
-  app.innerHTML = `<div class="editor"><div class="inline" style="justify-content:space-between"><a class="muted" href="#book/${bookId}">← 목차로 돌아가기</a><span id="saveState" class="save-state">마지막 저장 ${q.updatedAt ? new Date(q.updatedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}) : ""}</span></div><p class="eyebrow">${index + 1} / ${all.length} · ${escapeHtml(b.title)}</p><h1 class="editor-question">${escapeHtml(q.content)}</h1><textarea id="answerInput" class="field" style="width:100%;min-height:300px" placeholder="기억나는 이야기를 자유롭게 적어 주세요.">${escapeHtml(q.answer)}</textarea><p class="muted">30초마다 자동 저장됩니다. 사진·음성·동영상 첨부는 다음 버전에서 제공됩니다.</p><div class="actions"><div class="inline">${index > 0 ? `<a class="button ghost" href="#write/${bookId}/${all[index-1].id}">이전 질문</a>` : ""}${index < all.length-1 ? `<a class="button ghost" href="#write/${bookId}/${all[index+1].id}">다음 질문</a>` : ""}</div><div class="inline"><a class="button ghost" href="#book/${bookId}">책시작으로 돌아가기</a><button class="button primary" data-save-answer="final">저장</button></div></div></div>`;
+  app.innerHTML = `<div class="editor"><div class="inline" style="justify-content:space-between"><a class="muted" href="#book/${bookId}">← 목차로 돌아가기</a><span id="saveState" class="save-state">마지막 저장 ${q.updatedAt ? new Date(q.updatedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}) : ""}</span></div><p class="eyebrow">${index + 1} / ${all.length} · ${escapeHtml(b.title)}</p><h1 class="editor-question">${escapeHtml(q.content)}</h1>${renderTemplateAnswer(q)}<p class="muted">작성내용은 자동저장됩니다. 사진·음성 첨부는 다음버전에서 제공됩니다.</p><div class="actions"><div class="inline">${index > 0 ? `<a class="button ghost" href="#write/${bookId}/${all[index-1].id}">이전 질문</a>` : ""}${index < all.length-1 ? `<a class="button ghost" href="#write/${bookId}/${all[index+1].id}">다음 질문</a>` : ""}</div><div class="inline"><a class="button ghost" href="#book/${bookId}">책시작으로 돌아가기</a><button class="button primary" data-save-answer="final">저장</button></div></div></div>`;
+  initWritingAnswerState(bookId, q);
+  updateAutoSaveNotice();
   state.autoSave = setInterval(() => saveAnswer(bookId, questionId, false, true), 30000);
 }
 
@@ -961,6 +1033,15 @@ async function openProtectedBookOutput(bookId, print = false, outputWindow = nul
   }
 }
 
+function captureCreateDraft() { const form = document.querySelector("#create-basic-form"); if (form) state.bookDraft = { ...Object.fromEntries(new FormData(form)), isSelf: form.elements.isSelf?.checked === true }; }
+function captureGiftDraft() { const form = document.querySelector("#gift-basic-form"); if (form) state.giftDraft = { ...Object.fromEntries(new FormData(form)), isSelf: false }; }
+function basicInfoComplete(source, isGift) { const form = source?.elements ? source : null; const isSelf = !isGift && (form?.elements.isSelf?.checked === true || source?.isSelf === true || source?.isSelf === "true" || source?.isSelf === "on"); return Boolean(isSelf || String(form?.elements.sender?.value || source?.sender || "").trim()) && Boolean(isSelf || String(form?.elements.receiver?.value || source?.receiver || "").trim()); }
+function firstIncompleteCreateStep() { if (!state.createType) return 1; if (!basicInfoComplete(document.querySelector("#create-basic-form") || state.bookDraft, false)) return 2; return 4; }
+function firstIncompleteGiftStep() { if (!state.giftCreateType) return 1; if (!basicInfoComplete(document.querySelector("#gift-basic-form") || state.giftDraft, true)) return 2; return 4; }
+function navigateCreateStep(step) { captureCreateDraft(); const form = document.querySelector("#create-basic-form"); if (step > state.createStep && state.createStep === 2 && !validateBasicInfoForm(form)) return; const firstIncomplete = firstIncompleteCreateStep(); if (step > firstIncomplete) { if (firstIncomplete === 2) toastMsg("기본정보를 먼저 입력해주세요."); state.createStep = firstIncomplete; return create(); } state.createStep = step; return create(); }
+function navigateGiftStep(step) { captureGiftDraft(); captureGiftCover(); const form = document.querySelector("#gift-basic-form"); if (step > state.giftCreateStep && state.giftCreateStep === 2 && !validateBasicInfoForm(form)) return; const firstIncomplete = firstIncompleteGiftStep(); if (step > firstIncomplete) { if (firstIncomplete === 2) toastMsg("기본정보를 먼저 입력해주세요."); state.giftCreateStep = firstIncomplete; return giftCreate(); } state.giftCreateStep = step; return giftCreate(); }
+function onStepTabClick(e) { const createTab = e.target.closest("[data-create-step]"); if (createTab) return navigateCreateStep(Number(createTab.dataset.createStep)); const giftTab = e.target.closest("[data-gift-step]"); if (giftTab) return navigateGiftStep(Number(giftTab.dataset.giftStep)); }
+
 async function onClick(e) {
   const bannerPane = e.target.closest("[data-banner-link]");
   if (bannerPane) { window.location.href = bannerPane.dataset.bannerLink; return; }
@@ -1043,7 +1124,9 @@ async function onClick(e) {
 
 async function onSubmit(e) { if (!e.target.matches("form")) return; e.preventDefault(); const form = e.target; const data = Object.fromEntries(new FormData(form)); try { if (form.dataset.form === "login") { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithPassword({ email: data.email, password: data.password }); if (error) throw error; location.hash = "#home"; return render(); } if (form.dataset.form === "author-moment") { const id = form.dataset.id; await api(`/api/author/moments${id ? `/${id}` : ""}`, {method:id ? "PUT" : "POST", body:{slotTime:data.slotTime, momentDate:data.momentDate, body:data.body, isVisible:true}}); state.authorEditingId = null; toastMsg("Moments를 저장했습니다."); return moments(); } if (form.dataset.form === "create-book") { state.bookDraft = data; state.createStep = 3; return create(); } if (form.dataset.form === "gift-basic") { state.giftDraft = data; state.giftCreateStep = 3; return giftCreate(); } if (form.dataset.form === "admin") { const kind = form.dataset.kind; const id = form.dataset.id; if (kind === "review") { const payload = { ...data, sortOrder:Number(data.sortOrder), isVisible:data.isVisible === "true", variant:data.variant || null }; await api(`/api/admin/home/reviews${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "moment") { const payload = { ...data, isVisible:data.isVisible === "true" }; await api(`/api/admin/home/moments${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "banner") { const file = form.elements.image?.files?.[0]; const imagePath = file ? (await api("/api/admin/home/banner-upload", {method:"POST", body:{contentType:file.type, data:await readFileAsDataUrl(file)}})).imagePath : data.imagePath; const payload = { imagePath, caption:data.caption, linkUrl:data.linkUrl, position:data.position, isVisible:data.isVisible === "true" }; await api(`/api/admin/home/banners${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "cover-color") { const payload = { name:data.name, colorValue:data.colorValue, sortOrder:Number(data.sortOrder), isActive:data.isActive === "true" }; await api(`/api/admin/cover-colors${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "cover-image") { const file = form.elements.image?.files?.[0]; const imagePath = file ? (await api("/api/admin/cover-images/upload", {method:"POST", body:{contentType:file.type, data:await readFileAsDataUrl(file)}})).imagePath : data.imagePath; const payload = { name:data.name, imagePath, column:Number(data.column), sortOrder:Number(data.sortOrder), isActive:data.isActive === "true" }; await api(`/api/admin/cover-images${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else { const payload = { ...data, sortOrder:Number(data.sortOrder), isActive:data.isActive === "true" }; if (kind === "type") payload.questionGroupIds = [...form.querySelectorAll("input[name=questionGroupIds]:checked")].map(i => Number(i.value)); const endpoint = kind === "question" ? "/api/questions" : kind === "group" ? "/api/question-groups" : "/api/book-types"; await api(`${endpoint}${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } document.querySelector(".modal")?.remove(); toastMsg("저장했습니다."); return render(); } } catch (error) { toastMsg(error.message); } }
 
-async function saveAnswer(bookId, questionId, final, quiet = false) { const input = document.querySelector("#answerInput"); if (!input) return; await api(`/api/books/${bookId}/answers`, {method:"PUT", body:{questionId, answer:input.value, isFinal:final}}); const label = document.querySelector("#saveState"); if (label) label.textContent = `저장됨 ${new Date().toLocaleTimeString("ko-KR", {hour:"2-digit",minute:"2-digit"})}`; if (!quiet) toastMsg(final ? "저장했습니다." : "자동 저장했습니다."); }
+async function saveAnswer(bookId, questionId, final, quiet = false) { if (!document.querySelector("#answerInput") && !document.querySelector("[data-template-answer-index]")) return; if (writingSavePromise) { await writingSavePromise; return saveAnswer(bookId, questionId, final, quiet); } const value = currentWritingAnswerValue(); if (!final && writingAnswerState && Number(writingAnswerState.bookId) === Number(bookId) && Number(writingAnswerState.questionId) === Number(questionId) && !writingAnswerState.dirty) return; writingSavePromise = api(`/api/books/${bookId}/answers`, {method:"PUT", body:{questionId, answer:value, isFinal:final}}); try { await writingSavePromise; if (writingAnswerState && Number(writingAnswerState.bookId) === Number(bookId) && Number(writingAnswerState.questionId) === Number(questionId)) { writingAnswerState.savedValue = value; writingAnswerState.dirty = currentWritingAnswerValue() !== value; } const label = document.querySelector("#saveState"); if (label && !writingAnswerState?.dirty) label.textContent = `저장됨 ${new Date().toLocaleTimeString("ko-KR", {hour:"2-digit",minute:"2-digit"})}`; if (!quiet) toastMsg(final ? "저장했습니다." : "자동 저장했습니다."); } finally { writingSavePromise = null; } }
+async function saveCurrentAnswerBeforeLeave() { if (!writingAnswerState?.dirty) return true; try { while (writingAnswerState?.dirty) await saveAnswer(writingAnswerState.bookId, writingAnswerState.questionId, false, true); return true; } catch (error) { toastMsg(`저장하지 못했습니다: ${error.message}`); return false; } }
+function updateAutoSaveNotice() { document.querySelectorAll(".book-writing-footer > p, .editor > .muted").forEach((element) => { if (element.textContent.includes("자동 저장")) element.textContent = "작성내용은 자동저장됩니다. 사진·음성 첨부는 다음버전에서 제공됩니다."; }); }
 
 async function openForm(kind, column = "") { if (kind === "banner") return openBannerModal(null); await openModal(kind, null, column); await setNewAdminSortOrder(kind, column); }
 async function setNewAdminSortOrder(kind, coverColumn = "") {
@@ -1072,7 +1155,7 @@ async function openModal(kind, item, coverColumn = "") { const groups = ["questi
   document.body.insertAdjacentHTML("beforeend", `<div class="modal"><form class="modal-box" data-form="admin" data-kind="${kind}" data-id="${item?.id||""}" data-cover-color="${item?.coverColor || "#00BC3C"}" data-text-color="${item?.textColor || "#FFFFFF"}"><div class="inline" style="justify-content:space-between"><h2>${kind === "question" ? "질문" : kind === "group" ? "질문그룹" : kind === "type" ? "북타입" : kind === "cover-color" ? "표지 컬러" : kind === "cover-image" ? "표지 이미지" : kind === "moment" ? "Moments" : "Review"} ${title}</h2><button type="button" class="button small" data-close-modal>닫기</button></div>${fields}<div class="actions"><button type="button" class="button ghost" data-close-modal>취소</button><button class="button primary">저장</button></div></form></div>`); }
 async function removeAdmin(kind, id) { if (!confirm("정말 삭제하시겠습니까?")) return; const endpoint = kind === "question" ? "/api/questions" : kind === "group" ? "/api/question-groups" : kind === "type" ? "/api/book-types" : kind === "cover-color" ? "/api/admin/cover-colors" : kind === "cover-image" ? "/api/admin/cover-images" : kind === "review" ? "/api/admin/home/reviews" : kind === "moment" ? "/api/admin/home/moments" : "/api/admin/home/banners"; try { await api(`${endpoint}/${id}`, {method:"DELETE"}); toastMsg("삭제했습니다."); render(); } catch (e) { toastMsg(e.message); } }
 function updateBookTypePreview(form) { const preview = form.querySelector("[data-type-preview]"); if (!preview) return; const name = form.elements.name.value || "Parents"; const image = form.elements.coverImage.value; const previewImage = preview.querySelector("[data-preview-image]"); previewImage.src = `/assets/${image}`; previewImage.alt = `${name} 유형 일러스트`; }
-function onInput(e) { const form = e.target.closest('form[data-kind="type"]'); if (!form) return; if (["coverColor", "textColor"].includes(e.target.name)) { e.target.value = e.target.value.replace(/[^#0-9a-f]/gi, "").replace(/(?!^)#/g, "").slice(0, 7); const preview = form.querySelector("[data-cover-preview]"); if (!preview) return; const coverColor = form.elements.coverColor.value; const textColor = form.elements.textColor.value; preview.style.background = /^#[0-9a-f]{6}$/i.test(coverColor) ? coverColor : "#00BC3C"; preview.style.color = /^#[0-9a-f]{6}$/i.test(textColor) ? textColor : "#FFFFFF"; return; } if (["name", "description"].includes(e.target.name)) updateBookTypePreview(form); }
+function onInput(e) { if (e.target.matches(".book-template-segmented-input")) resizeSegmentedAnswerInput(e.target); if (e.target.matches(".book-template-short-input")) resizeShortAnswerInput(e.target); if ((e.target.id === "answerInput" || e.target.matches("[data-template-answer-index]")) && writingAnswerState && Number(writingAnswerState.questionId) === Number(pageQuestionId(location.hash.split("/").pop()))) { writingAnswerState.dirty = currentWritingAnswerValue() !== writingAnswerState.savedValue; const label = document.querySelector("#saveState"); if (label && writingAnswerState.dirty) label.textContent = "저장되지 않음"; } const form = e.target.closest('form[data-kind="type"]'); if (!form) return; if (["coverColor", "textColor"].includes(e.target.name)) { e.target.value = e.target.value.replace(/[^#0-9a-f]/gi, "").replace(/(?!^)#/g, "").slice(0, 7); const preview = form.querySelector("[data-cover-preview]"); if (!preview) return; const coverColor = form.elements.coverColor.value; const textColor = form.elements.textColor.value; preview.style.background = /^#[0-9a-f]{6}$/i.test(coverColor) ? coverColor : "#00BC3C"; preview.style.color = /^#[0-9a-f]{6}$/i.test(textColor) ? textColor : "#FFFFFF"; return; } if (["name", "description"].includes(e.target.name)) updateBookTypePreview(form); }
 function onChange(e) {
   if (e.target.matches("[data-self-book]")) { const form = e.target.form; state.bookDraft = { ...Object.fromEntries(new FormData(form)), isSelf: e.target.checked }; return create(); }
   if (e.target.matches("[data-dashboard-period]")) { const value = e.target.value; if (value === "custom") return admin("dashboard"); return loadAdminDashboard(value); }
@@ -1093,15 +1176,21 @@ function onChange(e) {
   if (e.target.name !== "image" || !e.target.files?.[0]) return;
   const preview = e.target.form?.querySelector("[data-banner-preview]"); if (!preview) return; preview.src = URL.createObjectURL(e.target.files[0]); preview.classList.remove("admin-banner-preview-empty"); preview.textContent = "";
 }
+function validateBasicInfoForm(form) {
+  if (!form) return false;
+  const isSelf = form.dataset.form === "create-book" && form.elements.isSelf?.checked === true;
+  if (!isSelf) {
+    form.elements.sender?.setCustomValidity("");
+    form.elements.receiver?.setCustomValidity("");
+  }
+  form.elements.title.value = String(form.elements.title?.value || "").trim() || DEFAULT_BOOK_TITLE;
+  form.elements.introduction.value = String(form.elements.introduction?.value || "").trim() || DEFAULT_RECIPIENT_MESSAGE;
+  return form.reportValidity();
+}
 function validateBasicInfoSubmit(e) {
   const form = e.target;
   if (!form.matches('form[data-form="create-book"], form[data-form="gift-basic"]')) return;
-  const isSelf = form.dataset.form === "create-book" && form.elements.isSelf?.checked === true;
-  const sender = String(form.elements.sender?.value || "").trim();
-  const receiver = String(form.elements.receiver?.value || "").trim();
-  if (!isSelf && (!sender || !receiver)) { e.preventDefault(); e.stopImmediatePropagation(); toastMsg("보내는 사람과 받는 사람을 입력하세요."); return; }
-  form.elements.title.value = String(form.elements.title?.value || "").trim() || DEFAULT_BOOK_TITLE;
-  form.elements.introduction.value = String(form.elements.introduction?.value || "").trim() || DEFAULT_RECIPIENT_MESSAGE;
+  if (!validateBasicInfoForm(form)) { e.preventDefault(); e.stopImmediatePropagation(); }
 }
 
 async function loadAdminDashboard(period, from = "", to = "") { const query = new URLSearchParams({ period }); if (from) query.set("from", from); if (to) query.set("to", to); try { const data = await api(`/api/admin/dashboard?${query}`); app.innerHTML = `<div class="admin-layout"><nav class="panel side-menu" aria-label="관리자 메뉴"></nav><main class="admin-content">${adminDashboardExpanded(data)}</main></div>`; renderAdminMenu("dashboard"); normalizeAdminPageStructure(); } catch (error) { toastMsg(error.message); } }
@@ -1129,6 +1218,30 @@ function enhanceQuestionGroupModal(form) {
   }).catch(() => {});
 }
 
+async function uploadQuestionImage(input) {
+  const form = input.form;
+  const file = input.files?.[0];
+  if (!form || !file) return;
+  if (![/^image\/(jpeg|png|webp)$/i.test(file.type), file.size <= 10 * 1024 * 1024].every(Boolean)) {
+    input.value = "";
+    form.dataset.questionImageUpload = "failed";
+    toastMsg("JPG, PNG, WEBP 형식의 10MB 이하 이미지만 첨부할 수 있습니다.");
+    return;
+  }
+  form.dataset.questionImageUpload = "pending";
+  try {
+    const result = await api("/api/admin/question-image", { method: "POST", body: { contentType: file.type, data: await readFileAsDataUrl(file) } });
+    form.elements.imageUrl.value = result.imageUrl || result.imagePath || "";
+    const preview = form.querySelector("[data-question-image-preview]");
+    if (preview) { preview.outerHTML = `<img class="admin-banner-preview" data-question-image-preview src="${escapeHtml(form.elements.imageUrl.value)}" alt="참고 이미지 미리보기">`; }
+    form.dataset.questionImageUpload = "done";
+    toastMsg("참고 이미지를 업로드했습니다.");
+  } catch (error) {
+    form.dataset.questionImageUpload = "failed";
+    toastMsg(`참고 이미지 업로드에 실패했습니다: ${error.message}`);
+  }
+}
+
 const questionGroupModalObserver = new MutationObserver(() => {
   document.querySelectorAll('form[data-kind="group"]').forEach(enhanceQuestionGroupModal);
 });
@@ -1136,6 +1249,7 @@ questionGroupModalObserver.observe(document.body, { childList: true, subtree: tr
 
 document.addEventListener("change", (event) => {
   const input = event.target;
+  if (input.name === "questionImage" && input.form?.dataset.kind === "question") return void uploadQuestionImage(input);
   if (input.name !== "image" || input.form?.dataset.kind !== "group" || !input.files?.[0]) return;
   const preview = input.form.querySelector("[data-group-image-preview]");
   if (preview) preview.src = URL.createObjectURL(input.files[0]);
@@ -1189,8 +1303,10 @@ document.addEventListener("submit", async (event) => {
   if (!form.matches('form[data-form="admin"][data-kind="question"]')) return;
   event.preventDefault();
   event.stopImmediatePropagation();
+  if (form.dataset.questionImageUpload === "pending") { toastMsg("참고 이미지 업로드가 끝날 때까지 기다려 주세요."); return; }
+  if (form.dataset.questionImageUpload === "failed") { toastMsg("참고 이미지 업로드에 실패해 질문을 저장할 수 없습니다."); return; }
   const data = Object.fromEntries(new FormData(form));
-  const payload = { ...data, sortOrder: Number(data.sortOrder), isActive: data.isActive === "true", bookTypeIds: [...form.querySelectorAll("input[name=bookTypeIds]:checked")].map((input) => Number(input.value)) };
+  const payload = { ...data, sortOrder: Number(data.sortOrder), isActive: data.isActive === "true", bookTypeIds: [...form.querySelectorAll("input[name=bookTypeIds]:checked")].map((input) => Number(input.value)), shortAnswerTitles: [...form.querySelectorAll('input[name="shortAnswerTitles"]')].map((input) => input.value), imageGuidance: form.querySelector('textarea[name="imageGuidance"]')?.value || "", imageUrl: form.querySelector('input[name="imageUrl"]')?.value || "" };
   try {
     await api(`/api/questions${form.dataset.id ? `/${form.dataset.id}` : ""}`, { method: form.dataset.id ? "PUT" : "POST", body: payload });
     document.querySelector(".modal")?.remove();
@@ -1260,3 +1376,32 @@ function adminDashboardExpanded(d) {
   const typeSummary = [["Parents", "P"], ["Couple", "C"], ["Single Parent", "SP"], ["Single", "S"]].map(([name, code]) => `<span>${name} ${code} ${books.byType?.[name] || 0}</span>`).join("");
   return `<div class="eyebrow">ADMIN</div><div class="admin-page-heading-row"><h1 class="admin-title">대시보드</h1><label class="dashboard-period-label">기간<select data-dashboard-period aria-label="통계 기간"><option value="all" ${d.period === "all" ? "selected" : ""}>전체</option><option value="month" ${d.period === "month" ? "selected" : ""}>이번 달</option><option value="week" ${d.period === "week" ? "selected" : ""}>이번 주</option><option value="today" ${d.period === "today" ? "selected" : ""}>오늘</option><option value="custom" ${d.period === "custom" ? "selected" : ""}>기간 선택</option></select></label></div>${d.period === "custom" ? `<div class="dashboard-custom-period"><input type="date" data-dashboard-from value="${d.from.slice(0, 10)}" aria-label="시작일"><span>—</span><input type="date" data-dashboard-to value="${d.to.slice(0, 10)}" aria-label="종료일"><button type="button" class="button small" data-dashboard-apply>적용</button></div>` : ""}<div class="admin-dashboard-content"><section class="gift-dashboard-section"><h2>선물 현황</h2><div class="admin-dashboard-stats gift-dashboard-stats">${stat(d.stats.gifts, "선물 수")}${stat(`${d.stats.accessRate}%`, "접속률")}${stat(d.stats.writing, "작성 중")}${stat(d.stats.completed, "완료")}</div><h3>선물 추이 <small>${labels[d.period]}</small></h3><div class="gift-trend-chart">${bars}</div><h3>전달 현황</h3><div class="gift-delivery-stats"><div><b>${d.deliveryCounts.kakao}</b><span>카카오톡</span></div><div><b>${d.deliveryCounts.email}</b><span>이메일</span></div><div><b>${d.deliveryCounts.code}</b><span>코드복사</span></div></div></section><section class="gift-dashboard-section"><h2>북 현황</h2><div class="admin-dashboard-stats gift-dashboard-stats">${stat(books.total, "전체 북 수")}${stat(`${books.accessRate}%`, "접속률")}${stat(books.writing, "작성 중")}${stat(books.completed, "완료")}${stat(books.shared === null ? "-" : books.shared, "공유", ` <span class="dashboard-info" title="미리보기 허용" aria-label="미리보기 허용">ⓘ</span>`)}</div><div class="book-type-summary">${typeSummary}</div><p class="muted">공유 수는 미리보기 허용 데이터가 준비된 후 집계됩니다.</p></section><section class="gift-dashboard-section"><h2>사용자 현황</h2><div class="admin-dashboard-stats gift-dashboard-stats">${stat(users.total, "전체 사용자")}${stat(users.new, "신규 사용자")}${stat(users.active, "활성 사용자")}${stat(users.gifted === null ? "-" : users.gifted, "선물받은 사용자")}</div><p class="muted">선물받은 사용자 수는 현재 선물코드 세션에 사용자 식별자가 없어 집계하지 않습니다.</p></section></div>`;
 }
+function questionTemplateEditor(form, item = {}) {
+  if (!form || form.querySelector("[data-question-template-editor]")) return;
+  const config = item.templateConfig && typeof item.templateConfig === "object" ? item.templateConfig : {};
+  const titles = Array.isArray(config.shortAnswerTitles) && config.shortAnswerTitles.length ? config.shortAnswerTitles : ["", ""];
+  const titleInputs = titles.map((title) => `<label class="field"><span class="question-template-copy">소타이틀</span><input name="shortAnswerTitles" value="${escapeHtml(title)}" placeholder="소타이틀"></label>`).join("");
+  const imageUrl = questionReferenceImageUrl({ templateConfig: config });
+  const imagePreview = imageUrl ? `<img class="admin-banner-preview" data-question-image-preview src="${escapeHtml(imageUrl)}" alt="현재 참고 이미지">` : `<div class="admin-banner-preview admin-banner-preview-empty" data-question-image-preview>참고 이미지 없음</div>`;
+  const editor = `<div data-question-template-editor><label class="field">질문 템플릿<select name="templateType"><option value="basic">기본형</option><option value="short-answer">짧은 답변형</option><option value="image">이미지형</option><option value="short-answer-image">짧은 답변 이미지형</option><option value="segmented">구분 답변형</option></select></label><div data-question-template-fields="short-answer short-answer-image segmented"><div data-question-template-short-titles>${titleInputs}<button type="button" class="button small" data-add-short-title>소타이틀 추가</button></div></div><div data-question-template-fields="image short-answer-image"><label class="field"><span class="question-template-copy">이미지 안내문구</span><textarea name="imageGuidance" placeholder="이미지 안내문구">${escapeHtml(config.imageGuidance || "")}</textarea></label><label class="field"><span class="question-template-copy">이미지 첨부</span>${imagePreview}<input type="file" name="questionImage" accept="image/jpeg,image/png,image/webp"><input type="hidden" name="imageUrl" value="${escapeHtml(config.imageUrl || "")}"></label></div><div data-question-template-fields="segmented"><p class="question-template-copy">구분 답변형은 위 소타이틀 2개를 사용합니다.</p></div></div>`;
+  form.querySelector(".actions")?.insertAdjacentHTML("beforebegin", editor);
+  const select = form.elements.templateType;
+  if (!select) return;
+  select.value = ["basic", "short-answer", "image", "short-answer-image", "segmented"].includes(item.templateType) ? item.templateType : "basic";
+  const sync = () => form.querySelectorAll("[data-question-template-fields]").forEach((section) => { section.hidden = !section.dataset.questionTemplateFields.split(" ").includes(select.value); });
+  select.addEventListener("change", sync);
+  sync();
+}
+async function hydrateQuestionTemplateEditor(form) { if (!form?.dataset.id || form.dataset.templateHydrated) return; form.dataset.templateHydrated = "loading"; try { const item = await api(`/api/questions/${form.dataset.id}`); const type = form.elements.templateType; if (type) type.value = ["basic", "short-answer", "image", "short-answer-image", "segmented"].includes(item.templateType) ? item.templateType : "basic"; const config = item.templateConfig && typeof item.templateConfig === "object" ? item.templateConfig : {}; const titles = Array.isArray(config.shortAnswerTitles) ? config.shortAnswerTitles : []; const titleInputs = [...form.querySelectorAll('input[name="shortAnswerTitles"]')]; titles.forEach((value, index) => { if (titleInputs[index]) titleInputs[index].value = value; }); form.querySelectorAll('textarea[name="imageGuidance"]').forEach((input) => { input.value = config.imageGuidance || ""; }); form.querySelectorAll('input[name="imageUrl"]').forEach((input) => { input.value = config.imageUrl || ""; }); type?.dispatchEvent(new Event("change")); form.dataset.templateHydrated = "done"; } catch { form.dataset.templateHydrated = "error"; } }
+function ensureQuestionTopSaveButton(form) { const heading = form?.querySelector(":scope > .inline"); if (!heading) return; let actions = heading.querySelector(":scope > .question-modal-header-actions"); if (!actions) { const close = heading.querySelector("[data-close-modal]"); if (!close) return; if (!heading.querySelector("[data-question-top-save]")) close.insertAdjacentHTML("beforebegin", '<button class="button primary small" type="submit" data-question-top-save>저장</button>'); const save = heading.querySelector("[data-question-top-save]"); actions = document.createElement("div"); actions.className = "question-modal-header-actions"; actions.append(save, close); heading.append(actions); } }
+const questionTemplateModalObserver = new MutationObserver(() => document.querySelectorAll('form[data-form="admin"][data-kind="question"]').forEach((form) => { questionTemplateEditor(form); hydrateQuestionTemplateEditor(form); ensureQuestionTopSaveButton(form); }));
+questionTemplateModalObserver.observe(document.body, { childList: true, subtree: true });
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-add-short-title]");
+  if (!button) return;
+  const list = button.closest("[data-question-template-short-titles]");
+  const label = document.createElement("label");
+  label.className = "field";
+  label.innerHTML = '<span class="question-template-copy">소타이틀</span><input name="shortAnswerTitles" placeholder="소타이틀">';
+  list?.insertBefore(label, button);
+});

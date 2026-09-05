@@ -13,6 +13,7 @@ body{background:#fff}
 
 /* Figma 공통 흐름: 02 기본정보 · 03 안내 · 04 질문생성 */
 .create-page.create-basic-page,.create-page.create-info-page,.create-page.create-outline-page{width:100%;padding-top:0}.create-basic-page .create-steps,.create-info-page .create-steps,.create-outline-page .create-steps{justify-content:flex-start}.create-info-page .create-steps{margin-bottom:54px}.create-basic-page .create-form,.create-info-page .create-info-list,.create-outline-page .create-outline{margin-left:0;margin-right:0}.create-info-page .create-info-list,.create-info-page .create-info-list section{border:0}.create-info-page .create-info-list section{padding:13px 0}@media(max-width:760px){.create-info-page .create-steps{margin-bottom:96px}}
+.create-page:not(.create-basic-page):not(.create-info-page):not(.create-outline-page) > .create-steps{justify-content:flex-start}
 .create-outline-page .create-outline{width:100%;border-top:0}.create-outline-page .create-steps{margin-bottom:54px}.create-outline-content{display:flex;align-items:flex-start;gap:126px}.outline-thumbnail-column{flex:0 0 260px}.outline-thumbnail{position:relative;height:330px;overflow:hidden;background:#faf8ec}.outline-thumbnail img{position:absolute;z-index:1;bottom:10px;left:50%;width:82%;height:69%;transform:translateX(-50%);object-fit:contain}.outline-thumbnail .thumbnail-title,.outline-thumbnail .thumbnail-type{position:absolute;z-index:2;left:0;width:100%;text-align:center}.outline-thumbnail .thumbnail-title{top:10px;color:#c99a7e;font-family:"Reenie Beanie",cursive;font-size:47px;line-height:1}.outline-thumbnail .thumbnail-type{top:62px;color:#37322e;font-family:Rubik,ui-sans-serif,sans-serif;font-size:17px;font-weight:400;line-height:1.2}.outline-thumbnail-summary{margin:14px 0 0;color:#746b63;font-family:"Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:14px;line-height:1.6}.outline-groups{flex:1;min-width:0}.create-outline-page .outline-group{border:0}@media(max-width:760px){.create-outline-page .create-steps{margin-bottom:96px}.create-outline-content{display:block}.outline-thumbnail-column{width:100%;max-width:260px;margin-bottom:30px}}
 .create-flow{width:min(880px,100%);margin:0 auto;padding-top:32px}.create-steps{justify-content:center;margin:0 0 76px}.create-steps span{white-space:nowrap}.create-steps .active{color:#fb6d62;font-weight:700}.create-steps i{width:min(110px,10vw)}.create-flow-heading{margin-bottom:42px;text-align:center}.create-flow-heading .create-kicker{margin-bottom:18px;font-size:14px}.create-flow-heading h1{margin:0 0 16px;font-family:"Apple SD Gothic Neo","Noto Serif KR",Georgia,serif;font-size:36px;font-weight:400;letter-spacing:-2.2px;line-height:1.32}.create-flow-heading>p:last-child{margin:0;color:#706960;font-family:"Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:16px}.create-form{width:min(560px,100%);margin:0 auto;padding:34px 38px;border:1px solid #e7ded4;border-radius:0;background:#fff}.create-form .field{margin-bottom:24px;color:#39332e;font-family:"Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-weight:500}.create-form .field input,.create-form .field textarea{border:0;border-bottom:1px solid #cfc4b9;border-radius:0;background:transparent;padding:11px 0;color:#332e2a}.create-form .field input:focus,.create-form .field textarea:focus{outline:0;border-bottom-color:#9b5d42;box-shadow:none}.create-form .field textarea{min-height:112px}.create-flow .actions{margin-top:38px}.create-flow .button.ghost{border-color:#847a70;background:#fff;color:#514a44}.create-flow .button.primary{min-width:104px;border-radius:4px;background:#3e3934;color:#fff}.create-info-list,.create-outline{width:min(680px,100%);margin:0 auto;border-top:1px solid #cfc4b9}.create-info-list section,.create-outline .outline-group{padding:26px 0;border-bottom:1px solid #dfd7cf}.create-info-list h2,.create-outline .outline-group h3{margin:0 0 10px;color:#342f2a;font-family:"Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:17px;font-weight:600}.create-info-list p,.create-outline .outline-group p{margin:0;color:#716961;font-family:"Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:15px;line-height:1.8}.create-info-list .actions,.create-outline .actions{padding-top:20px}.create-outline-title{padding:30px 0 26px;text-align:center;border-bottom:1px solid #dfd7cf}.create-outline-title .thumbnail-title{position:static;display:block;color:#c99a7e;font-size:45px}.create-outline-title h2{margin:2px 0 13px;font-family:Rubik,ui-sans-serif,sans-serif;font-size:22px;font-weight:400}.create-outline-title p{margin:0;color:#746b63;font-family:"Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:14px}@media(max-width:760px){.create-flow{padding-top:14px}.create-steps{margin-bottom:48px;gap:7px;font-size:10px}.create-steps i{width:7px}.create-flow-heading h1{font-size:29px}.create-form{padding:28px 22px}.create-info-list section,.create-outline .outline-group{padding:21px 0}}
 /* Figma: 북타입명 */
@@ -318,9 +319,12 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
 .create-basic-field{display:grid;gap:7px;margin-bottom:40px;color:#39332e;font-weight:500}
 .create-basic-field:last-of-type{margin-bottom:0}
 .create-basic-field .guide_02{font-family:"Apple SD Gothic Neo",sans-serif;font-size:12px;font-weight:400;line-height:normal;color:#363636}
-.required-mark{position:relative;top:-.15em;color:#FF6F5E;font-size:.9em;line-height:0}
-.create-basic-self{display:flex;align-items:center;gap:8px;margin-top:24px;color:#363636;font:400 12px/normal "Apple SD Gothic Neo",sans-serif}
+.create-basic-field:nth-of-type(2) .guide_02{position:relative;display:block;min-height:16px;min-width:0}
+.create-basic-field:nth-of-type(2) .guide_02 > .create-basic-self{position:absolute;top:50%;right:0;transform:translateY(-50%)}
+.required-mark{position:relative;top:-.15em;color:#FF6F5E;font-size:1.15em;font-weight:700;line-height:0}
+.create-basic-self{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0;margin:0;color:#363636;font:400 12px/normal "Apple SD Gothic Neo",sans-serif;white-space:nowrap}
 .create-basic-self input{width:16px;height:16px;margin:0;accent-color:#363636}
+.create-steps span[data-create-step],.create-steps span[data-gift-step]{cursor:pointer}
 .create-basic-field input,.create-basic-field textarea{width:100%;border:0;border-bottom:1px solid #b2b2b2;border-radius:0;background:transparent;padding:10px 0;color:#363636;font-family:"Apple SD Gothic Neo",sans-serif;font-size:16px;font-weight:700;line-height:1.8;text-align:left}
 .create-basic-field input::placeholder,.create-basic-field textarea::placeholder{color:#b2b2b2;font:700 16px/1.8 "Apple SD Gothic Neo",sans-serif;opacity:1;text-align:left}
 .create-basic-field input:focus,.create-basic-field textarea:focus{outline:0;border-bottom-color:#9b5d42;box-shadow:none}
@@ -483,6 +487,9 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
   .author-moments{padding-top:0}
   .profile-page{padding-top:0}
 }
+.modal-box[data-form="admin"][data-kind="question"] > .inline{display:flex;align-items:center;justify-content:space-between;flex-wrap:nowrap;gap:16px}
+.modal-box[data-form="admin"][data-kind="question"] > .inline>h2{margin-right:auto;white-space:nowrap}
+.modal-box[data-form="admin"][data-kind="question"] .question-modal-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-left:auto;flex:0 0 auto}
 
 /* 모바일 비홈 공통 여백 */
 @media(max-width:760px){
@@ -596,6 +603,8 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
     display:flex;
     flex-direction:column;
     align-items:stretch;
+    width:100%;
+    max-width:none;
     min-height:0;
     padding:0;
     border-top:0;
@@ -607,6 +616,7 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
     display:block;
     flex:none;
     width:100%;
+    max-width:none;
     min-width:0;
     height:auto;
     padding:0 0 0;
@@ -623,6 +633,7 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
     align-items:center;
     justify-content:space-between;
     width:100%;
+    max-width:none;
     min-width:0;
     margin-top:20px;
     padding-left:10px;
@@ -823,6 +834,21 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
 }
 
 @media(max-width:760px){
+  body.book-detail-route:not(.book-writing-full-route) #app.app{
+    padding-left:0;
+    padding-right:0;
+  }
+  body.book-detail-route:not(.book-writing-full-route) .book-detail-head,
+  body.book-detail-route:not(.book-writing-full-route) .book-writing-layout{
+    width:calc(100% - 60px);
+    margin-left:30px;
+    margin-right:30px;
+  }
+  body.book-detail-route:not(.book-writing-full-route) .book-detail-progress-row{
+    width:calc(100% - 60px);
+    margin-left:30px;
+    margin-right:30px;
+  }
   body.book-detail-route .book-writing-panel{z-index:0}
   body.book-detail-route .book-writing-tools{z-index:2}
   body.book-writing-full-route .book-writing-save-state{z-index:2}
@@ -841,3 +867,46 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
 .home-route .home-main > .home-review{margin-top:0}
 .home-route .home-moment-label{color:#363636;font-family:"Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;font-size:14px;font-weight:400;line-height:normal;white-space:nowrap}
 @media (min-width: 768px){.home-route .home-note-inner{display:flex;flex-direction:column;gap:20px}.home-route .home-note-description{height:auto}}
+/* 질문 템플릿 2차 작성 UI: 기존 기본 답변 영역과 분리 */
+.book-template-answer-content{display:flex;flex-direction:column;width:min(500px,100%);min-width:0;min-height:420px;margin:0 auto}
+.book-template-short-answer-content{min-height:0}
+.book-template-short-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:auto;gap:20px;width:100%;margin:20px auto 0}
+.book-template-short-box{display:flex;flex-direction:column;min-width:0;min-height:0;padding:15px;background:#F8F6EA;color:#3fc85f}
+.question-template-copy{display:block;margin-bottom:12px;color:#3fc85f;font-size:13px;font-weight:400;line-height:1.5;word-break:keep-all}
+.book-template-answer-input{display:block;width:100%;height:420px;min-height:420px;resize:vertical;border:0;outline:0;background:transparent;color:#b26d3b;font:700 16px/2.6 "Apple SD Gothic Neo",sans-serif;letter-spacing:-.64px}
+.book-template-answer-content .book-template-answer-input{height:auto;min-height:0;flex:1;min-width:0}
+.book-template-short-answer-content .book-template-answer-input{flex:none;min-height:calc(3 * 2.6em);overflow:hidden;resize:none}
+.book-template-answer-content>.book-answer-input{height:auto;min-height:120px;flex:1;min-width:0}
+.book-template-reference{width:min(500px,100%);margin:20px auto 0;color:#b26d3b}
+.book-template-reference p{margin:0 0 14px;line-height:1.5;white-space:pre-wrap}
+.book-template-reference img{display:block;width:100%;max-height:300px;object-fit:contain;object-position:center}
+.book-template-answer-content>.book-template-reference{flex:0 0 auto;max-height:180px;overflow:hidden}
+.book-template-answer-content>.book-template-reference img{max-height:120px}
+.book-template-segmented{display:flex;flex:1;flex-direction:column;width:100%;max-width:100%;min-width:0;min-height:0;margin:60px auto 0}
+.book-template-segmented label{display:block;text-align:center}
+.book-template-segmented label{display:flex;flex:1;flex-direction:column;min-height:0}
+.book-template-segmented label+label{margin-top:20px}
+.book-template-segmented-input-wrap{display:block;width:30%;max-width:100%;min-width:0;flex:1;margin:0 auto;padding:0 40px;overflow:visible;box-sizing:border-box}
+.book-template-segmented-input{display:block;width:100%;min-width:0;height:auto;min-height:0;margin:0;padding:0;border:0;outline:0;background:repeating-linear-gradient(to bottom,transparent 0,transparent 41px,#eadfd8 41px,#eadfd8 42px);text-align:center;white-space:pre-wrap;overflow:visible;resize:none}
+.book-template-segmented-input-measure{position:absolute;visibility:hidden;white-space:pre;font:700 16px/1.8 "Apple SD Gothic Neo",sans-serif;letter-spacing:-.64px}
+.book-output-question .book-output-structured-answer{width:100%;color:#b26d3b;font:700 16px/2.6 "Apple SD Gothic Neo",sans-serif;letter-spacing:-.64px;white-space:normal;word-break:keep-all;overflow-wrap:normal}
+.book-output-question .book-output-structured-item+.book-output-structured-item{margin-top:20px}
+.book-output-question .book-output-structured-item h3{margin:0 0 8px;color:#3fc85f;font:400 13px/1.5 "Apple SD Gothic Neo",sans-serif;letter-spacing:0;word-break:keep-all}
+.book-output-question .book-output-structured-item p{margin:0;color:#b26d3b;font:700 16px/2.6 "Apple SD Gothic Neo",sans-serif;letter-spacing:-.64px;white-space:pre-wrap;word-break:keep-all;overflow-wrap:normal}
+.book-output-question .book-output-segmented-answer{width:100%;margin-top:60px;text-align:center}
+.book-output-question .book-output-segmented-item+.book-output-segmented-item{margin-top:20px}
+.book-output-question .book-output-segmented-item .question-template-copy{margin-bottom:12px;text-align:center;font-family:inherit;font-size:13px;font-weight:400;line-height:1.5;color:#3fc85f}
+.book-output-question .book-output-segmented-value{width:100%;max-width:100%;min-width:0;min-height:41.6px;margin:0 auto;padding:0 40px;box-sizing:border-box;color:#b26d3b;font:700 16px/2.6 "Apple SD Gothic Neo",sans-serif;letter-spacing:-.64px;text-align:center;white-space:pre-wrap;overflow:visible;resize:none}
+.book-output-question .book-output-reference{width:100%;margin:60px auto 0;text-align:center}
+.book-output-question .book-output-reference p{margin:0 0 14px;color:#3fc85f;font:400 13px/1.5 "Apple SD Gothic Neo",sans-serif;white-space:pre-wrap}
+.book-output-question .book-output-reference img{display:block;width:100%;max-height:180px;object-fit:contain;object-position:center}
+@media(max-width:760px){.book-template-short-grid{width:100%;grid-template-columns:minmax(0,1fr)}.book-template-short-box{padding-left:15px;padding-right:15px}.book-template-reference,.book-template-segmented{width:100%}}
+@media(min-width:761px){
+  body.book-detail-route:not(.book-writing-full-route) .book-writing-layout{grid-template-columns:max-content minmax(0,1fr)}
+  body.book-detail-route:not(.book-writing-full-route) .book-writing-layout > .book-question-list{width:max-content;min-width:0;max-width:none;overflow:hidden}
+  body.book-detail-route:not(.book-writing-full-route) .book-writing-layout > .book-question-list .book-question-group{width:max-content;max-width:none}
+  body.book-detail-route:not(.book-writing-full-route) .book-writing-layout > .book-question-list .book-question-group-title{width:max-content;max-width:none}
+  body.book-detail-route:not(.book-writing-full-route) .book-question-icons{display:flex;flex:0 0 90px;flex-wrap:wrap;width:90px;max-width:90px;align-content:flex-start}
+  body.book-detail-route:not(.book-writing-full-route) .book-question-icon,
+  body.book-detail-route:not(.book-writing-full-route) .book-group-page-icon{flex:0 0 30px}
+}
