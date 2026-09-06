@@ -918,6 +918,7 @@ async function admin(section) {
   renderAdminMenu(section);
   normalizeAdminPageStructure();
   normalizeAdminActionButtons();
+  normalizeAdminEditTitles();
 }
 
 function renderAdminMenu(section) {
@@ -939,6 +940,28 @@ function normalizeAdminActionButtons() {
     icon.src = `/assets/${isDelete ? "icn_trash.svg" : "icn_edit.svg"}`;
     icon.alt = "";
     button.append(icon);
+  });
+}
+function normalizeAdminEditTitles() {
+  const rules = [
+    { selector: "[data-edit-question]", cell: 1 },
+    { selector: "[data-edit-group]", cell: 1 },
+    { selector: "[data-edit-type]", cell: 1 },
+    { selector: "[data-edit-cover-color]", cell: 0 },
+    { selector: "[data-edit-cover-image]", cell: 1 },
+    { selector: "[data-edit-review]", cell: 1 },
+    { selector: "[data-edit-moment]", cell: 3 },
+    { selector: "[data-edit-banner]", cell: 2 },
+  ];
+  document.querySelectorAll("tr").forEach((row) => {
+    for (const rule of rules) {
+      if (!row.querySelector(rule.selector)) continue;
+      const titleCell = row.cells[rule.cell];
+      if (!titleCell) continue;
+      titleCell.classList.add("admin-list-edit-title");
+      titleCell.dataset.adminEditTitle = rule.selector;
+      break;
+    }
   });
 }
 function normalizeAdminPageStructure() {
@@ -1060,6 +1083,11 @@ function onStepTabClick(e) { const createTab = e.target.closest("[data-create-st
 async function onClick(e) {
   const bannerPane = e.target.closest("[data-banner-link]");
   if (bannerPane) { window.location.href = bannerPane.dataset.bannerLink; return; }
+  const adminEditTitle = e.target.closest("[data-admin-edit-title]");
+  if (adminEditTitle) {
+    const editButton = adminEditTitle.closest("tr")?.querySelector(adminEditTitle.dataset.adminEditTitle);
+    if (editButton) { e.preventDefault(); editButton.click(); return; }
+  }
   if (state.mobileMenuOpen && !e.target.closest("#topbar [data-mobile-menu-panel], #topbar [data-mobile-menu-toggle]")) closeMobileMenu();
   const el = e.target.closest("[data-go],[data-pick-type],[data-next-create],[data-create-back],[data-create-confirm],[data-gift-pick-type],[data-gift-next],[data-gift-back],[data-gift-create],[data-copy-gift-code],[data-gift-share],[data-open-book-output],[data-gift-logout],[data-save-answer],[data-save-inline-answer],[data-book-page],[data-notewindow-toggle],[data-publish-book],[data-save-cover],[data-delete-publication],[data-delete-book],[data-open-book-delete],[data-confirm-book-delete],[data-open-book-info],[data-confirm-book-info],[data-open-form],[data-question-list-type],[data-edit-question],[data-edit-group],[data-edit-type],[data-edit-cover-color],[data-edit-cover-image],[data-edit-review],[data-edit-moment],[data-edit-banner],[data-admin-gift-detail],[data-dashboard-apply],[data-google-login],[data-kakao-login],[data-naver-login],[data-logout],[data-store-link],[data-mobile-menu-toggle],[data-mobile-story-toggle],[data-mobile-menu-item],[data-author-edit],[data-author-cancel-edit],[data-toggle-question],[data-toggle-review],[data-toggle-moment],[data-toggle-moment-author],[data-save-moment-author],[data-delete-question],[data-delete-group],[data-delete-type],[data-delete-cover-color],[data-delete-cover-image],[data-delete-review],[data-delete-moment],[data-delete-banner],[data-close-modal]"); if (!el) return;
   if (el.dataset.mobileMenuToggle !== undefined) return toggleMobileMenu();

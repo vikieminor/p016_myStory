@@ -867,6 +867,8 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
 .home-route .home-main > .home-review{margin-top:0}
 .home-route .home-moment-label{color:#363636;font-family:"Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;font-size:14px;font-weight:400;line-height:normal;white-space:nowrap}
 @media (min-width: 768px){.home-route .home-note-inner{display:flex;flex-direction:column;gap:20px}.home-route .home-note-description{height:auto}}
+.admin-list-edit-title{cursor:pointer}
+.admin-list-edit-title:hover{text-decoration:underline;text-decoration-color:var(--brand);text-underline-offset:3px}
 /* 질문 템플릿 2차 작성 UI: 기존 기본 답변 영역과 분리 */
 .book-template-answer-content{display:flex;flex-direction:column;width:min(500px,100%);min-width:0;min-height:420px;margin:0 auto}
 .book-template-short-answer-content{min-height:0}
