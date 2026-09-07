@@ -927,3 +927,4 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
 .book-template-image-answer-content>.book-answer-input{min-height:calc(7 * 2.6em)}
 .book-template-image-answer-content{padding-bottom:20px}
 .book-writing-question h2{word-break:keep-all;overflow-wrap:break-word;white-space:normal}
+@media(max-width:680px){.gift-share-page .gift-share-pages{display:flex!important;flex-direction:column!important;flex-wrap:nowrap!important;align-items:center!important;width:100%!important}.gift-share-page .gift-share-pages>.book-output-page{display:block!important;flex:0 0 auto!important;width:calc(100vw - 32px)!important;max-width:calc(100vw - 32px)!important;height:auto!important;aspect-ratio:148 / 210!important}}
