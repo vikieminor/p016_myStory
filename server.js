@@ -105,6 +105,8 @@ async function handleApi(req, res, url) {
   if (method === "POST" && pathName === "/api/gifts") return void await createGiftRoute(req, res, body);
   const giftShareMatch = pathName.match(/^\/api\/gifts\/(\d+)\/share$/);
   if (giftShareMatch) return void await giftShareRoute(req, res, method, Number(giftShareMatch[1]));
+  const giftShareReceiveMatch = pathName.match(/^\/api\/gifts\/share\/([^/]+)\/receive$/);
+  if (giftShareReceiveMatch) return void await giftShareReceiveRoute(req, res, decodeURIComponent(giftShareReceiveMatch[1]));
   if (method === "POST" && pathName === "/api/gifts/login") return void await giftLoginRoute(req, res, body);
   if (method === "POST" && pathName === "/api/gifts/logout") return void await giftLogoutRoute(req, res);
   if (method === "GET" && pathName === "/api/gifts/session") return void await giftSessionRoute(req, res);
@@ -238,6 +240,7 @@ async function handleApi(req, res, url) {
   const adminGiftMatch = pathName.match(/^\/api\/admin\/gifts\/(\d+)$/);
   if (adminGiftMatch) {
     if (!(await requireAdmin(req, res))) return;
+    if (method === "DELETE") return void await deleteAdminGiftRoute(res, Number(adminGiftMatch[1]));
     if (method !== "GET") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
     const detail = await presentAdminGiftDetail(Number(adminGiftMatch[1]));
     return detail ? sendJson(res, 200, detail) : sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
@@ -411,14 +414,39 @@ async function giftShareRoute(req, res, method, giftId) {
   return sendJson(res, 201, { shareUrl: `/gift-share/${token}` });
 }
 
-async function renderGiftSharePage(req, res, token) {
+async function giftFromShareToken(token) {
   let tokenHash;
-  try { tokenHash = hashGiftSessionToken(token); } catch { return sendText(res, 404, "Not Found"); }
+  try { tokenHash = hashGiftSessionToken(token); } catch { return null; }
   const share = (await list("giftShareTokens")).find((item) => equalSecret(item.tokenHash, tokenHash) && !item.revokedAt);
   const gift = share ? await get("gifts", share.giftId) : null;
-  if (!gift || gift.status !== "active" || gift.revokedAt) return sendText(res, 404, "Not Found");
+  return gift && gift.status === "active" && !gift.revokedAt ? gift : null;
+}
+
+async function createGiftSession(gift, req) {
+  const now = Date.now();
+  const accessedAt = new Date(now).toISOString();
+  const token = randomBytes(32).toString("base64url");
+  const session = await create("giftSessions", { giftId: gift.id, sessionTokenHash: hashGiftSessionToken(token), lastAccessedAt: accessedAt, expiresAt: new Date(now + GIFT_SESSION_TTL_MS).toISOString(), userAgent: String(req.headers["user-agent"] || "").slice(0, 512) });
+  await update("gifts", gift.id, { lastAccessedAt: accessedAt });
+  return { token, session };
+}
+
+async function giftShareReceiveRoute(req, res, token) {
+  if (req.method !== "GET") return sendJson(res, 405, { error: "지원하지 않는 요청입니다." });
+  const gift = await giftFromShareToken(token);
+  if (!gift) return sendText(res, 404, "유효하지 않거나 폐기된 선물 링크입니다.");
   const book = await get("books", gift.bookId);
-  if (!book) return sendText(res, 404, "Not Found");
+  if (!book) return sendText(res, 404, "선물받은 책을 찾을 수 없습니다.");
+  const { token: sessionToken, session } = await createGiftSession(gift, req);
+  res.writeHead(303, { Location: "/#books", "Set-Cookie": giftCookieHeader(sessionToken, req) });
+  res.end();
+}
+
+async function renderGiftSharePage(req, res, token) {
+  const gift = await giftFromShareToken(token);
+  if (!gift) return sendText(res, 404, "유효하지 않거나 폐기된 선물 링크입니다.");
+  const book = await get("books", gift.bookId);
+  if (!book) return sendText(res, 404, "선물받은 책을 찾을 수 없습니다.");
   const details = await presentBook(book, true);
   const pages = buildBookOutputPages(details).slice(0, 2);
   const body = pages.map((page, index) => renderBookOutputPage(page, index + 1)).join("");
@@ -426,7 +454,7 @@ async function renderGiftSharePage(req, res, token) {
     @font-face{font-family:"KoPub Batang";src:url("/node_modules/@noonnu/ko-pub-batang/fonts/kopub-batang-400.woff2") format("woff2");font-weight:400}
     *{box-sizing:border-box}body{margin:0;background:#eee8e2;color:#363636;font-family:"Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif}.gift-share-page{max-width:900px;margin:0 auto;padding:48px 20px}.gift-share-intro{margin-bottom:32px;text-align:center}.gift-share-intro h1{margin:0 0 12px;font-family:"KoPub Batang",serif;font-weight:400}.gift-share-intro p{margin:0;color:#756d63}.gift-share-pages{display:flex;flex-direction:column;align-items:center;gap:28px}.gift-share-pages .book-output-page{position:relative;width:148mm;height:210mm;min-height:0;padding:22mm 16mm 18mm;background:#fff;box-shadow:0 8px 24px #4c33201f;overflow:hidden;break-after:page}.gift-share-pages .book-output-page>div{position:relative;z-index:1}.gift-share-pages .book-output-title,.gift-share-pages .book-output-recipient,.gift-share-pages .book-output-greeting{display:flex;align-items:center;justify-content:center;text-align:center}.gift-share-pages .book-output-title{padding:0;background:transparent;text-align:left}.gift-share-pages .book-output-title .publish-book-cover{width:100%;height:100%;--cover-scale:1.332;background-color:var(--cover-color,#feaae8);-webkit-print-color-adjust:exact;print-color-adjust:exact}.gift-share-pages .book-output-title .publish-cover-content{height:100%}.gift-share-pages .book-output-recipient{background:#fffdf9}.gift-share-pages .book-output-recipient-script{position:absolute;top:50px;left:65px;margin:0;color:#fff;font:400 40px/1 "Reenie Beanie",cursive;white-space:nowrap}.gift-share-pages .book-output-recipient-rule{position:absolute;top:0;left:20px;width:1px;height:595px;background:rgba(255,255,255,.2)}.gift-share-pages .book-output-recipient-content{display:flex;flex-direction:column;align-items:center;gap:60px;width:196px}.gift-share-pages .book-output-person{display:flex;flex-direction:column;align-items:center;gap:20px;width:max-content;min-width:138px;max-width:100%}.gift-share-pages .book-output-person>span{color:#008b21;font:400 11px/1.8 "Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;letter-spacing:-.44px;white-space:nowrap}.gift-share-pages .book-output-person-name{display:flex;flex-direction:column;align-items:center;width:max-content;max-width:100%}.gift-share-pages .book-output-recipient-message{width:196px;color:#b26d3b;font:400 12px/1.8 "KoPub Batang",serif;letter-spacing:-.48px;text-align:center;white-space:pre-wrap;word-break:keep-all}.gift-share-pages .book-output-person-name p{margin:0;color:#363636;font:400 20px/1.9 "KoPub Batang",serif;letter-spacing:-.8px;white-space:nowrap}.gift-share-pages .book-output-person-name i{display:block;width:100%;height:1px;margin-top:0;background:#b9a89c;opacity:.7}.gift-share-pages .publish-book-cover{position:relative;overflow:hidden;background:var(--cover-color,#feaae8);color:#fff;box-shadow:inset calc(20px * var(--cover-scale)) 0 0 rgba(255,255,255,.16)}.gift-share-pages .publish-book-cover::before{content:"";position:absolute;inset:0 auto 0 calc(20px * var(--cover-scale));width:calc(1px * var(--cover-scale));background:rgba(255,255,255,.55)}.gift-share-pages .publish-cover-content{position:relative;z-index:1;display:flex;flex-direction:column;align-items:flex-start;padding:calc(50px * var(--cover-scale)) calc(60px * var(--cover-scale)) calc(28px * var(--cover-scale))}.gift-share-pages .publish-cover-script{margin:0 0 calc(12px * var(--cover-scale));color:rgba(255,255,255,.94);font:calc(40px * var(--cover-scale))/1 "Reenie Beanie",cursive}.gift-share-pages .publish-cover-content h2{display:-webkit-box;max-width:calc(310px * var(--cover-scale));margin:0;color:#fff;font:400 calc(24px * var(--cover-scale))/1.35 "KoPub Batang",serif;letter-spacing:calc(-1.2px * var(--cover-scale));word-break:keep-all;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2}.gift-share-pages .publish-cover-publisher{margin:auto 0 0;color:#fff;font:700 calc(13px * var(--cover-scale))/1.8 "Apple SD Gothic Neo",sans-serif}.gift-share-pages .publish-book-cover>img{position:absolute;right:calc(40px * var(--cover-scale));bottom:calc(76px * var(--cover-scale));width:calc(100px * var(--cover-scale));height:calc(150px * var(--cover-scale));object-fit:contain}.gift-share-pages .publish-cover-content small{color:rgba(255,255,255,.85);font:400 8px/1.4 "Apple SD Gothic Neo",sans-serif;white-space:nowrap;transform:rotate(-90deg);transform-origin:left top;position:absolute;right:-100px;bottom:74px}.gift-share-note{margin-top:32px;padding:24px;background:#f8f6ea;text-align:center;white-space:pre-line}
     @media(max-width:680px){.gift-share-page{padding:32px 16px}.gift-share-pages .book-output-page{width:calc(100vw - 32px)!important;height:auto!important;aspect-ratio:148 / 210;padding:22mm 16mm 18mm}.gift-share-pages .book-output-recipient-content{gap:40px}.gift-share-pages .book-output-recipient-script{left:42px}.gift-share-note{padding:20px 16px}}
-  </style><main class="gift-share-page"><section class="gift-share-intro"><h1>${escapeHtml(book.title)}</h1><p>${escapeHtml(book.sender || "보내는 사람")}님이 준비한 선물입니다.</p></section><section class="gift-share-pages">${body}</section><p class="gift-share-note">선물코드로 로그인하면 선물받은 책을 이어서 작성할 수 있습니다.\n선물코드는 선물을 보낸 사람에게 확인해 주세요.</p></main></html>`);
+  </style><main class="gift-share-page"><section class="gift-share-intro"><h1>${escapeHtml(book.title)}</h1><p>${escapeHtml(book.sender || "보내는 사람")}님이 준비한 선물입니다.</p></section><section class="gift-share-pages">${body}</section><p class="gift-share-note">당신을 위한 이야기가 도착했습니다.\n\n<a href="/api/gifts/share/${escapeHtml(token)}/receive">선물 확인하기</a>\n\n선물 확인하기를 누르면 선물받은 책을 확인하고 이어서 작성할 수 있습니다.</p></main></html>`);
 }
 
 async function giftCoverSelection(body) {
@@ -687,9 +715,7 @@ async function giftLoginRoute(req, res, body) {
   const gift = (await list("gifts")).find((item) => equalSecret(item.giftCodeHash, codeHash) && item.status === "active" && !item.revokedAt);
   if (!gift) { recordGiftLoginFailure(req); return sendJson(res, 401, { error: "유효하지 않은 선물코드입니다." }); }
   giftLoginAttempts.delete(giftLoginRateKey(req));
-  const now = Date.now(); const token = randomBytes(32).toString("base64url");
-  const session = await create("giftSessions", { giftId: gift.id, sessionTokenHash: hashGiftSessionToken(token), lastAccessedAt: new Date(now).toISOString(), expiresAt: new Date(now + GIFT_SESSION_TTL_MS).toISOString(), userAgent: String(req.headers["user-agent"] || "").slice(0, 512) });
-  await update("gifts", gift.id, { lastAccessedAt: new Date(now).toISOString() });
+  const { token, session } = await createGiftSession(gift, req);
   return sendJsonWithCookie(res, 200, { giftId: gift.id, bookId: gift.bookId, sessionExpiresAt: session.expiresAt }, giftCookieHeader(token, req));
 }
 async function giftLogoutRoute(req, res) {
@@ -1064,6 +1090,16 @@ async function giftDeliveryRoute(req, res, method, giftId, body) {
   const delivery = await create("giftDeliveries", { giftId, method: methodName, metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : null });
   if (!gift.initialDeliveryMethod) await update("gifts", giftId, { initialDeliveryMethod: methodName });
   return sendJson(res, 201, { id: delivery.id, giftId, method: methodName, createdAt: delivery.createdAt });
+}
+
+async function deleteAdminGiftRoute(res, giftId) {
+  const gift = await get("gifts", giftId);
+  if (!gift) return sendJson(res, 404, { error: "선물을 찾을 수 없습니다." });
+  for (const key of ["giftDeliveries", "giftShareTokens", "giftSessions"]) {
+    for (const item of await list(key)) if (Number(item.giftId) === Number(gift.id)) await remove(key, item.id);
+  }
+  await remove("gifts", gift.id);
+  return sendJson(res, 200, { ok: true, giftId: gift.id, bookId: gift.bookId, bookDeleted: false });
 }
 
 async function momentAuthorRoute(res, method, id, body) {
