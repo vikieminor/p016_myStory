@@ -811,14 +811,14 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
     min-width:0;
     box-sizing:border-box;
     margin:0;
-    padding:0 30px 12px;
+    padding:20px 30px;
     border:0;
     border-radius:0;
     background:#fff;
   }
   body.book-writing-full-route .book-detail-page.book-writing-full .book-writing-content{
     margin-top:0;
-    padding-top:56px;
+    padding-top:18px;
   }
   body.book-writing-full-route .book-detail-page.book-writing-full .book-writing-save-state{
     position:absolute;
@@ -912,3 +912,18 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
   body.book-detail-route:not(.book-writing-full-route) .book-question-icon,
   body.book-detail-route:not(.book-writing-full-route) .book-group-page-icon{flex:0 0 30px}
 }
+.book-answer-input::placeholder{opacity:.4}
+.book-template-answer-content>.book-template-reference-short-image{max-height:none;overflow:visible}
+.book-template-answer-content>.book-template-reference-short-image{width:100%;max-width:none;margin-left:0;margin-right:0;align-self:stretch}
+.book-template-answer-content>.book-template-reference-short-image img{width:100%;min-width:0;height:auto;max-width:none;max-height:none;object-fit:contain}
+.book-writing-panel{display:flex;flex-direction:column;padding-bottom:20px}
+.book-writing-content{display:flex;flex:1 1 auto;flex-direction:column;min-height:0}
+.book-writing-content>.book-answer-input{height:auto;flex:1 1 auto}
+.book-writing-content>.book-template-answer-content{flex:1 1 auto;min-height:0}
+.book-writing-content>.book-template-answer-content:not(.book-template-short-answer-content){min-height:420px}
+.book-writing-footer{margin:auto 0 0}
+#answerInput.book-answer-input{background-attachment:local}
+.book-writing-content>.book-answer-input{min-height:calc(12 * 2.6em)}
+.book-template-image-answer-content>.book-answer-input{min-height:calc(7 * 2.6em)}
+.book-template-image-answer-content{padding-bottom:20px}
+.book-writing-question h2{word-break:keep-all;overflow-wrap:break-word;white-space:normal}
