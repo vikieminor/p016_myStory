@@ -928,3 +928,5 @@ body.book-detail-route .book-detail-actions > .button:nth-child(2){background:tr
 .book-template-image-answer-content{padding-bottom:20px}
 .book-writing-question h2{word-break:keep-all;overflow-wrap:break-word;white-space:normal}
 @media(max-width:680px){.gift-share-page .gift-share-pages>.gift-share-page-shell{position:relative;width:calc(100vw - 32px);aspect-ratio:148 / 210;overflow:visible}.gift-share-page .gift-share-pages>.gift-share-page-shell>.book-output-page{position:absolute;top:0;left:50%;width:148mm!important;height:210mm!important;transform:translateX(-50%) scale(calc((100vw - 32px) / 559.3701px));transform-origin:top center;flex:none!important}}
+@media(max-width:680px){.gift-share-page .gift-share-pages>.gift-share-page-shell:not(:first-child)>.book-output-page{padding:16mm 12mm 12mm}.gift-share-page .gift-share-pages>.gift-share-page-shell:not(:first-child)>.book-output-page>.book-output-group-content{inset:12mm}}
+.gift-share-page .gift-share-note a{text-decoration:underline}
