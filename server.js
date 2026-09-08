@@ -223,7 +223,11 @@ async function handleApi(req, res, url) {
   if (pathName === "/api/books") {
     const access = await authenticateRequest(req, res);
     if (!access) return sendJson(res, 401, { error: "로그인이 필요합니다." });
-    if (method === "GET") return sendJson(res, 200, access.kind === "account" ? await presentBooks(access.user.id) : await presentBooksForGift(access.gift.id));
+    if (method === "GET") {
+      if (access.kind !== "account") return sendJson(res, 200, await presentBooksForGift(access.gift.id));
+      const [books, bookTypes, answers, publications] = await Promise.all([list("books"), list("bookTypes"), list("answers"), list("publications")]);
+      return sendJson(res, 200, await presentBooks(access.user.id, { gifts: access.gifts, books, bookTypes, answers, publications }));
+    }
     if (access.kind !== "account") return sendJson(res, 403, { error: "계정 로그인이 필요합니다." });
     if (method === "POST") return void await createBookRoute(res, body, access.user);
   }
@@ -665,7 +669,10 @@ function sendJsonWithCookie(res, status, data, cookie) { res.writeHead(status, {
 
 async function authenticateRequest(req, res = null) {
   const user = await authenticatedUser(req);
-  if (user) return { kind: "account", user, giftRecipientBookIds: new Set((await list("gifts")).filter((gift) => gift.recipientUserId === user.id).map((gift) => Number(gift.bookId))) };
+  if (user) {
+    const gifts = await list("gifts");
+    return { kind: "account", user, gifts, giftRecipientBookIds: new Set(gifts.filter((gift) => gift.recipientUserId === user.id).map((gift) => Number(gift.bookId))) };
+  }
   return await authenticateGiftSession(req, res);
 }
 async function authenticateGiftSession(req, res = null) {
@@ -1155,7 +1162,11 @@ async function momentAuthorRoute(res, method, id, body) {
   return sendJson(res, 200, { id: author.id, displayName: Object.hasOwn(body, "displayName") ? displayName : authorDisplayName, role: author.role, isActive: author.isActive, email: user?.email || "" });
 }
 
-async function findMomentAuthor(id) { return (await list("momentAuthors")).find((author) => author.id === id) || null; }
+async function findMomentAuthor(id) {
+  if (!USE_SUPABASE) return (await list("momentAuthors")).find((author) => author.id === id) || null;
+  const rows = await supabase(`/moment_authors?id=eq.${encodeURIComponent(id)}&select=*`);
+  return rows.length ? momentAuthorMap.from(rows[0]) : null;
+}
 async function ensureAdminMomentAuthor(user) {
   const existing = await findMomentAuthor(user.id);
   if (existing) {
@@ -1361,7 +1372,14 @@ async function presentCoverImages(admin = false) { return (await listCoverData("
 async function presentCoverOptions() { return { colors: await presentCoverColors(false), images: await presentCoverImages(false) }; }
 function presentCoverColor(color) { return { ...color }; }
 function presentCoverImage(image) { return { ...image, imageUrl: image.imagePath?.startsWith("data:") || image.imagePath?.startsWith("/") ? image.imagePath : publicCoverImageUrl(image.imagePath) }; }
-async function presentBooks(ownerId = null) {
+async function presentBooks(ownerId = null, source = null) {
+  if (source) {
+    const giftsByBookId = new Map(source.gifts.map((gift) => [Number(gift.bookId), gift]));
+    return Promise.all(source.books.filter((book) => {
+      const gift = giftsByBookId.get(Number(book.id));
+      return gift ? gift.recipientUserId === ownerId : book.ownerId === ownerId;
+    }).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((book) => presentBook(book, false, source)));
+  }
   const gifts = ownerId ? await list("gifts") : [];
   const giftsByBookId = new Map(gifts.map((gift) => [Number(gift.bookId), gift]));
   return Promise.all((await list("books")).filter((book) => {
@@ -1428,7 +1446,7 @@ function renderPreviewStructuredAnswer(answer, question) {
   const reference = question?.templateType === "short-answer-image" ? renderPreviewReference(question) : "";
   return `<div class="book-output-structured-answer" aria-label="답변">${items.map((item) => `<div class="book-output-structured-item"><h3>${escapeHtml(item?.title || "")}</h3><p>${escapeHtml(String(item?.value || ""))}</p></div>`).join("")}${reference}</div>`;
 }
-async function presentBook(book, detail = false) { const type = await get("bookTypes", book.bookTypeId); const answers = (await list("answers")).filter((a) => a.myBookId === book.id); const publication = (await list("publications")).filter((item) => item.myBookId === book.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).at(-1); const done = answers.filter((a) => a.isFinal || answerHasContent(a.answer)).length; const result = { ...book, bookTypeName: type?.name || "알 수 없는 북타입", coverImage: publication?.coverImage || type?.coverImage || "classic", coverImageSelected: Boolean(publication?.coverImage), coverColor: publication?.coverColor || type?.coverColor, coverColorSelected: Boolean(publication?.coverColor), textColor: type?.textColor, coverStyle: publication?.coverStyle || "classic", totalQuestions: answers.length, completedQuestions: done, progress: answers.length ? Math.round(done / answers.length * 100) : 0 }; result.coverImageUrl = publicCoverImageUrl(result.coverImage); return detail ? { ...result, outline: await bookOutline(book) } : result; }
+async function presentBook(book, detail = false, source = null) { const type = source ? source.bookTypes.find((item) => item.id === book.bookTypeId) : await get("bookTypes", book.bookTypeId); const answers = source ? source.answers.filter((a) => a.myBookId === book.id) : (await list("answers")).filter((a) => a.myBookId === book.id); const publication = (source ? source.publications : await list("publications")).filter((item) => item.myBookId === book.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).at(-1); const done = answers.filter((a) => a.isFinal || answerHasContent(a.answer)).length; const result = { ...book, bookTypeName: type?.name || "알 수 없는 북타입", coverImage: publication?.coverImage || type?.coverImage || "classic", coverImageSelected: Boolean(publication?.coverImage), coverColor: publication?.coverColor || type?.coverColor, coverColorSelected: Boolean(publication?.coverColor), textColor: type?.textColor, coverStyle: publication?.coverStyle || "classic", totalQuestions: answers.length, completedQuestions: done, progress: answers.length ? Math.round(done / answers.length * 100) : 0 }; result.coverImageUrl = publicCoverImageUrl(result.coverImage); return detail ? { ...result, outline: await bookOutline(book) } : result; }
 async function bookOutline(book) { const [groups, questions, answers] = await Promise.all([list("groups"), list("questions"), list("answers")]); const ownAnswers = answers.filter((a) => a.myBookId === book.id); const items = ownAnswers.map((a) => ({ ...a, question: questions.find((q) => q.id === a.questionId) })).filter((a) => a.question); const outline = groups.sort(sorter).map((group) => ({ ...group, imageUrl: group.imagePath?.startsWith("data:") ? group.imagePath : publicHomeBannerUrl(group.imagePath), questions: items.filter((item) => item.question.questionGroupId === group.id).sort((a, b) => sorter(a.question, b.question)).map((item) => ({ ...item.question, answerId: item.id, answer: item.answer, isFinal: item.isFinal, updatedAt: item.updatedAt })) })).filter((group) => group.questions.length); const total = items.length; const completed = items.filter((a) => a.isFinal || answerHasContent(a.answer)).length; return { groups: outline, total, completed, progress: total ? Math.round(completed / total * 100) : 0 }; }
 
 async function validateQuestion(body) { if (!String(body.content || "").trim()) return "질문 내용을 입력하세요."; if (!Number.isInteger(Number(body.sortOrder)) || Number(body.sortOrder) < 1) return "질문 순서는 1 이상의 숫자여야 합니다."; if (!(await get("groups", Number(body.questionGroupId)))) return "질문그룹을 선택하세요."; if (!Array.isArray(body.bookTypeIds) || !body.bookTypeIds.length) return "하나 이상의 북타입을 선택하세요."; const types = await list("bookTypes"); if (body.bookTypeIds.some((id) => !types.some((type) => type.id === Number(id)))) return "유효하지 않은 북타입입니다."; const templateType = normalizeQuestionTemplate(body.templateType); const subtitles = normalizeQuestionSubtitles(body.shortAnswerTitles); if (["short-answer", "short-answer-image"].includes(templateType) && subtitles.length < 2) return "짧은 답변형은 소타이틀을 2개 이상 입력하세요."; if (templateType === "segmented" && subtitles.length < 2) return "구분 답변형은 소타이틀을 2개 입력하세요."; if (["image", "short-answer-image"].includes(templateType) && !String(body.imageUrl || "").trim()) return "참고 이미지를 입력하세요."; return null; }
