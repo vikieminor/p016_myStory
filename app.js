@@ -66,7 +66,15 @@ let writingSavePromise = null;
 let writingNavigationPromise = null;
 async function handleWritingHashChange(event) {
   const resetScroll = event?.newURL && routeKeyFromUrl(event.newURL) !== routeKeyFromUrl(event.oldURL);
-  if (!writingAnswerState || !document.body.classList.contains("book-detail-route") || !event?.newURL) return renderAfterHashChange(event, resetScroll);
+  if (!document.body.classList.contains("book-detail-route") || !event?.newURL) return renderAfterHashChange(event, resetScroll);
+  const nextRoute = routeKeyFromUrl(event.newURL);
+  const previousRoute = routeKeyFromUrl(event.oldURL);
+  if (nextRoute === previousRoute && nextRoute.startsWith("book/") && state.currentBook) {
+    if (!(await saveCurrentAnswerBeforeLeave())) { history.replaceState(null, "", event.oldURL); return; }
+    clearInterval(state.autoSave); state.autoSave = null;
+    return book(Number(nextRoute.split("/")[1]), pageFromBookUrl(event.newURL), state.currentBook);
+  }
+  if (!writingAnswerState) return renderAfterHashChange(event, resetScroll);
   if (!isWritingHash(event.newURL)) return (await saveCurrentAnswerBeforeLeave()) ? renderAfterHashChange(event, resetScroll) : history.replaceState(null, "", event.oldURL);
   return (await saveCurrentAnswerBeforeLeave()) ? renderAfterHashChange(event, resetScroll) : history.replaceState(null, "", event.oldURL);
 }
@@ -77,6 +85,12 @@ function routeKeyFromUrl(url) {
     if (parts[0] === "book") return `${parts[0]}/${parts[1] || ""}`;
     return parts[0] || "home";
   } catch { return "home"; }
+}
+function pageFromBookUrl(url) {
+  const [, , pageParam] = new URL(url, location.href).hash.slice(1).split("/");
+  if (!pageParam) return null;
+  if (pageParam.startsWith("group-")) return { type: "group", groupId: Number(pageParam.slice(6)) };
+  return { type: "question", questionId: pageParam.startsWith("question-") ? Number(pageParam.slice(9)) : Number(pageParam) };
 }
 async function renderAfterHashChange(event, resetScroll = false) {
   const targetHash = location.hash;
@@ -918,11 +932,11 @@ function resizeShortAnswerInput(input) { input.style.height = "auto"; input.styl
 function resizeAllTemplateAnswerInputs() { document.querySelectorAll(".book-template-segmented-input").forEach(resizeSegmentedAnswerInput); document.querySelectorAll(".book-template-short-input").forEach(resizeShortAnswerInput); }
 function initWritingAnswerState(bookId, question) { const multi = ["short-answer", "short-answer-image", "segmented"].includes(questionTemplateType(question)); writingAnswerState = { bookId, questionId: question.id, multi, savedValue: multi ? JSON.stringify({ items: templateAnswerItems(question) }) : question.answer || "", dirty: false }; resizeAllTemplateAnswerInputs(); }
 
-async function book(id, selectedPage = null) {
+async function book(id, selectedPage = null, existingBook = null) {
   const bookRenderId = state.renderId;
   const previousQuestionList = app.querySelector(".book-question-list");
   const previousScrollLeft = previousQuestionList?.scrollLeft ?? null;
-  const b = await api(`/api/books/${id}`);
+  const b = existingBook || await api(`/api/books/${id}`);
   if (bookRenderId !== state.renderId) return;
   state.currentBook = b;
   const all = b.outline.groups.flatMap(g => g.questions);
@@ -1257,7 +1271,7 @@ async function onClick(e) {
 
 async function onSubmit(e) { if (!e.target.matches("form")) return; e.preventDefault(); const form = e.target; const data = Object.fromEntries(new FormData(form)); try { if (form.dataset.form === "login") { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithPassword({ email: data.email, password: data.password }); if (error) throw error; location.hash = "#home"; return render(); } if (form.dataset.form === "author-moment") { const id = form.dataset.id; await api(`/api/author/moments${id ? `/${id}` : ""}`, {method:id ? "PUT" : "POST", body:{slotTime:data.slotTime, momentDate:data.momentDate, body:data.body, isVisible:true}}); state.authorEditingId = null; toastMsg("Moments를 저장했습니다."); return moments(); } if (form.dataset.form === "create-book") { state.bookDraft = data; state.createStep = 3; return create(); } if (form.dataset.form === "gift-basic") { state.giftDraft = data; state.giftCreateStep = 3; return giftCreate(); } if (form.dataset.form === "admin") { const kind = form.dataset.kind; const id = form.dataset.id; if (kind === "review") { const payload = { ...data, sortOrder:Number(data.sortOrder), isVisible:data.isVisible === "true", variant:data.variant || null }; await api(`/api/admin/home/reviews${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "moment") { const payload = { ...data, isVisible:data.isVisible === "true" }; await api(`/api/admin/home/moments${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "banner") { const file = form.elements.image?.files?.[0]; const imagePath = file ? (await api("/api/admin/home/banner-upload", {method:"POST", body:{contentType:file.type, data:await readFileAsDataUrl(file)}})).imagePath : data.imagePath; const payload = { imagePath, caption:data.caption, linkUrl:data.linkUrl, position:data.position, isVisible:data.isVisible === "true" }; await api(`/api/admin/home/banners${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "cover-color") { const payload = { name:data.name, colorValue:data.colorValue, sortOrder:Number(data.sortOrder), isActive:data.isActive === "true" }; await api(`/api/admin/cover-colors${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else if (kind === "cover-image") { const file = form.elements.image?.files?.[0]; const imagePath = file ? (await api("/api/admin/cover-images/upload", {method:"POST", body:{contentType:file.type, data:await readFileAsDataUrl(file)}})).imagePath : data.imagePath; const payload = { name:data.name, imagePath, column:Number(data.column), sortOrder:Number(data.sortOrder), isActive:data.isActive === "true" }; await api(`/api/admin/cover-images${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } else { const payload = { ...data, sortOrder:Number(data.sortOrder), isActive:data.isActive === "true" }; if (kind === "type") payload.questionGroupIds = [...form.querySelectorAll("input[name=questionGroupIds]:checked")].map(i => Number(i.value)); const endpoint = kind === "question" ? "/api/questions" : kind === "group" ? "/api/question-groups" : "/api/book-types"; await api(`${endpoint}${id ? `/${id}` : ""}`, {method:id?"PUT":"POST",body:payload}); } document.querySelector(".modal")?.remove(); toastMsg("저장했습니다."); return render(); } } catch (error) { toastMsg(error.message); } }
 
-async function saveAnswer(bookId, questionId, final, quiet = false) { if (!document.querySelector("#answerInput") && !document.querySelector("[data-template-answer-index]")) return; if (writingSavePromise) { await writingSavePromise; return saveAnswer(bookId, questionId, final, quiet); } const value = currentWritingAnswerValue(); if (!final && writingAnswerState && Number(writingAnswerState.bookId) === Number(bookId) && Number(writingAnswerState.questionId) === Number(questionId) && !writingAnswerState.dirty) return; writingSavePromise = api(`/api/books/${bookId}/answers`, {method:"PUT", body:{questionId, answer:value, isFinal:final}}); try { await writingSavePromise; if (writingAnswerState && Number(writingAnswerState.bookId) === Number(bookId) && Number(writingAnswerState.questionId) === Number(questionId)) { writingAnswerState.savedValue = value; writingAnswerState.dirty = currentWritingAnswerValue() !== value; } const label = document.querySelector("#saveState"); if (label && !writingAnswerState?.dirty) label.textContent = `저장됨 ${new Date().toLocaleTimeString("ko-KR", {hour:"2-digit",minute:"2-digit"})}`; if (!quiet) toastMsg(final ? "저장했습니다." : "자동 저장했습니다."); } finally { writingSavePromise = null; } }
+async function saveAnswer(bookId, questionId, final, quiet = false) { if (!document.querySelector("#answerInput") && !document.querySelector("[data-template-answer-index]")) return; if (writingSavePromise) { await writingSavePromise; return saveAnswer(bookId, questionId, final, quiet); } const value = currentWritingAnswerValue(); if (!final && writingAnswerState && Number(writingAnswerState.bookId) === Number(bookId) && Number(writingAnswerState.questionId) === Number(questionId) && !writingAnswerState.dirty) return; writingSavePromise = api(`/api/books/${bookId}/answers`, {method:"PUT", body:{questionId, answer:value, isFinal:final}}); try { await writingSavePromise; const savedQuestion = state.currentBook?.outline?.groups?.flatMap((group) => group.questions).find((question) => Number(question.id) === Number(questionId)); if (savedQuestion) { savedQuestion.answer = value; savedQuestion.isFinal = final || savedQuestion.isFinal; savedQuestion.updatedAt = new Date().toISOString(); } if (writingAnswerState && Number(writingAnswerState.bookId) === Number(bookId) && Number(writingAnswerState.questionId) === Number(questionId)) { writingAnswerState.savedValue = value; writingAnswerState.dirty = currentWritingAnswerValue() !== value; } const label = document.querySelector("#saveState"); if (label && !writingAnswerState?.dirty) label.textContent = `저장됨 ${new Date().toLocaleTimeString("ko-KR", {hour:"2-digit",minute:"2-digit"})}`; if (!quiet) toastMsg(final ? "저장했습니다." : "자동 저장했습니다."); } finally { writingSavePromise = null; } }
 async function saveCurrentAnswerBeforeLeave() { if (!writingAnswerState?.dirty) return true; try { while (writingAnswerState?.dirty) await saveAnswer(writingAnswerState.bookId, writingAnswerState.questionId, false, true); return true; } catch (error) { toastMsg(`저장하지 못했습니다: ${error.message}`); return false; } }
 function updateAutoSaveNotice() { document.querySelectorAll(".book-writing-footer > p, .editor > .muted").forEach((element) => { if (element.textContent.includes("자동 저장")) element.textContent = "작성내용은 자동저장됩니다. 사진·음성 첨부는 다음버전에서 제공됩니다."; }); }
 
