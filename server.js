@@ -111,7 +111,10 @@ async function handleApi(req, res, url) {
   if (method === "POST" && pathName === "/api/gifts/claim") return void await claimGiftRoute(req, res);
   if (method === "POST" && pathName === "/api/gifts/logout") return void await giftLogoutRoute(req, res);
   if (method === "GET" && pathName === "/api/gifts/session") return void await giftSessionRoute(req, res);
-  if (method === "GET" && pathName === "/api/home") return sendJson(res, 200, { banners: await presentHomeBanners(false), moments: await presentCurrentMoment(), reviews: await presentHomeReviews(false) });
+  if (method === "GET" && pathName === "/api/home") {
+    const [banners, moments, reviews] = await Promise.all([presentHomeBanners(false), presentCurrentMoment(), presentHomeReviews(false)]);
+    return sendJson(res, 200, { banners, moments, reviews });
+  }
   if (method === "GET" && pathName === "/api/cover-options") return sendJson(res, 200, await presentCoverOptions());
   if (method === "GET" && /^\/api\/home\/moments\/[^/]+$/.test(pathName)) return sendJson(res, 200, await presentPublicMoments(decodeURIComponent(pathName.split("/").pop())));
 
@@ -1287,17 +1290,17 @@ function formatMomentPdfDate(date) { const [year, month, day] = String(date).spl
 async function presentAllMoments() { try { return Promise.all((await list("momentEntries")).sort((a, b) => String(b.momentDate).localeCompare(String(a.momentDate)) || Number(a.slotId) - Number(b.slotId)).map(presentMomentEntry)); } catch (error) { if (isMissingMomentTable(error)) return []; throw error; } }
 async function presentPublicMoments(authorId) { const now = new Date(); const entries = await Promise.all((await list("momentEntries")).filter((entry) => entry.authorId === authorId && entry.isVisible && (!entry.publishedAt || new Date(entry.publishedAt) <= now)).map(presentMomentEntry)); return entries.sort(sortMomentsByCreatedAt); }
 function sortMomentsByCreatedAt(a, b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); }
-async function presentMomentEntry(entry) { const slot = await get("momentSlots", entry.slotId); const author = entry.authorId ? await get("momentAuthors", entry.authorId) : null; return { ...entry, slotTime: entry.slotTime || slot?.slotTime || "", authorId: entry.authorId || "", author: author?.displayName || "", isSlotActive: slot?.isActive !== false }; }
+async function presentMomentEntry(entry, resolvedSlot = null) { const slot = resolvedSlot || await get("momentSlots", entry.slotId); const author = entry.authorId ? await get("momentAuthors", entry.authorId) : null; return { ...entry, slotTime: entry.slotTime || slot?.slotTime || "", authorId: entry.authorId || "", author: author?.displayName || "", isSlotActive: slot?.isActive !== false }; }
 async function presentCurrentMoment() {
   try {
   const now = new Date();
   const value = seoulDateParts(now);
   const today = value.date;
   const currentTime = value.time;
-  const entries = await list("momentEntries"); const slots = await list("momentSlots");
+  const [entries, slots] = await Promise.all([list("momentEntries"), list("momentSlots")]);
   const eligible = entries.filter((entry) => entry.isVisible && (!entry.publishedAt || new Date(entry.publishedAt) <= now)).map((entry) => ({ entry, slot: slots.find((item) => item.id === entry.slotId) })).filter((item) => item.slot?.isActive !== false && item.entry.slotTime && (item.entry.momentDate < today || (item.entry.momentDate === today && item.entry.slotTime <= currentTime))).sort((a, b) => String(b.entry.momentDate).localeCompare(String(a.entry.momentDate)) || b.entry.slotTime.localeCompare(a.entry.slotTime) || String(b.entry.createdAt || "").localeCompare(String(a.entry.createdAt || "")));
   if (!eligible.length) return null;
-  const item = await presentMomentEntry(eligible[0].entry); return { time: formatMomentTime(item.slotTime), date: formatMomentDate(item.momentDate), body: item.body, author: item.author, authorId: item.authorId, more: "more", moreUrl: `#moments-detail/${encodeURIComponent(item.authorId)}` };
+  const item = await presentMomentEntry(eligible[0].entry, eligible[0].slot); return { time: formatMomentTime(item.slotTime), date: formatMomentDate(item.momentDate), body: item.body, author: item.author, authorId: item.authorId, more: "more", moreUrl: `#moments-detail/${encodeURIComponent(item.authorId)}` };
   } catch (error) { if (isMissingMomentTable(error)) return null; throw error; }
 }
 function seoulDateParts(value = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(value); const dateParts = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value])); return { date: `${dateParts.year}-${dateParts.month}-${dateParts.day}`, time: `${dateParts.hour}:${dateParts.minute}` }; }
