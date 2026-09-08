@@ -413,7 +413,7 @@ async function render() {
     renderTopGnb(auth, state.writingBooksCache?.books || []);
     if (auth.session) getWritingBooks(auth).then((writingBooks) => { if (renderId === state.renderId) renderTopGnb(auth, writingBooks); });
     if (route === "admin" && auth.isAdmin !== true) { location.hash = "#home"; return; }
-    if (route === "home") return home(renderId);
+    if (route === "home") return home(renderId, auth);
     if (route === "books") return books(renderId);
     if (route === "create") return create(renderId);
     if (route === "gift-create") return giftCreate(renderId);
@@ -565,7 +565,7 @@ function renderTopGnb(auth, writingBooks = []) {
   topbar.querySelectorAll(".home-nav a, .home-nav-action").forEach((label) => label.classList.add("home-gnb-label"));
 }
 
-async function home(renderId = state.renderId) {
+async function home(renderId = state.renderId, auth) {
   const transparentBanner = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
   const homeContent = await api("/api/home");
   const leftBanner = (homeContent.banners || []).find((item) => item.position === "left") || null;
@@ -575,7 +575,6 @@ async function home(renderId = state.renderId) {
     right: rightBanner ? { src: rightBanner.imageUrl, alt: rightBanner.caption || "메인 배너", caption: rightBanner.caption } : { src: transparentBanner, alt: "", caption: "" },
   };
   const { note, recommendation, onlineWriting } = homeData;
-  const auth = await loadAuthState();
   if (!isCurrentRender(renderId)) return;
   const moments = homeContent.moments || { time: "", date: "", body: "", author: "", more: "" };
   const momentsUrl = moments.authorId ? `#moments-detail/${encodeURIComponent(moments.authorId)}` : "#moments-detail";
