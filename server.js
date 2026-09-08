@@ -108,6 +108,7 @@ async function handleApi(req, res, url) {
   const giftShareReceiveMatch = pathName.match(/^\/api\/gifts\/share\/([^/]+)\/receive$/);
   if (giftShareReceiveMatch) return void await giftShareReceiveRoute(req, res, decodeURIComponent(giftShareReceiveMatch[1]));
   if (method === "POST" && pathName === "/api/gifts/login") return void await giftLoginRoute(req, res, body);
+  if (method === "POST" && pathName === "/api/gifts/claim") return void await claimGiftRoute(req, res);
   if (method === "POST" && pathName === "/api/gifts/logout") return void await giftLogoutRoute(req, res);
   if (method === "GET" && pathName === "/api/gifts/session") return void await giftSessionRoute(req, res);
   if (method === "GET" && pathName === "/api/home") return sendJson(res, 200, { banners: await presentHomeBanners(false), moments: await presentCurrentMoment(), reviews: await presentHomeReviews(false) });
@@ -661,7 +662,7 @@ function sendJsonWithCookie(res, status, data, cookie) { res.writeHead(status, {
 
 async function authenticateRequest(req, res = null) {
   const user = await authenticatedUser(req);
-  if (user) return { kind: "account", user };
+  if (user) return { kind: "account", user, giftRecipientBookIds: new Set((await list("gifts")).filter((gift) => gift.recipientUserId === user.id).map((gift) => Number(gift.bookId))) };
   return await authenticateGiftSession(req, res);
 }
 async function authenticateGiftSession(req, res = null) {
@@ -691,7 +692,7 @@ async function authenticateGiftSession(req, res = null) {
 }
 function authorizeBookAccess(book, access) {
   if (!access) return false;
-  if (access.kind === "account") return isAdminUser(access.user) || book.ownerId === access.user.id;
+  if (access.kind === "account") return isAdminUser(access.user) || book.ownerId === access.user.id || (access.giftRecipientBookIds || new Set()).has(Number(book.id));
   return access.kind === "gift" && access.gift.bookId === book.id && access.book.id === book.id;
 }
 function giftLoginRateKey(req) { return req.socket?.remoteAddress || "unknown"; }
@@ -716,7 +717,28 @@ async function giftLoginRoute(req, res, body) {
   if (!gift) { recordGiftLoginFailure(req); return sendJson(res, 401, { error: "유효하지 않은 선물코드입니다." }); }
   giftLoginAttempts.delete(giftLoginRateKey(req));
   const { token, session } = await createGiftSession(gift, req);
-  return sendJsonWithCookie(res, 200, { giftId: gift.id, bookId: gift.bookId, sessionExpiresAt: session.expiresAt }, giftCookieHeader(token, req));
+  const book = await get("books", gift.bookId);
+  return sendJsonWithCookie(res, 200, { giftId: gift.id, bookId: gift.bookId, receiver: book?.receiver || "", sessionExpiresAt: session.expiresAt }, giftCookieHeader(token, req));
+}
+async function claimGiftRoute(req, res) {
+  const user = await authenticatedUser(req);
+  if (!user) return sendJson(res, 401, { error: "계정 로그인이 필요합니다." });
+  const access = await authenticateGiftSession(req, res);
+  if (!access) return sendJson(res, 401, { error: "연결할 선물 세션이 없거나 만료되었습니다." });
+  const gift = await get("gifts", access.gift.id);
+  const book = gift ? await get("books", gift.bookId) : null;
+  if (!gift || !book || gift.bookId !== access.book.id || access.gift.bookId !== book.id) return sendJson(res, 403, { error: "선물과 책의 연결을 확인할 수 없습니다." });
+  if (gift.recipientUserId && gift.recipientUserId !== user.id) return sendJson(res, 409, { error: "이 선물은 이미 다른 계정에 연결되어 있습니다." });
+  if (gift.recipientUserId === user.id) return sendJson(res, 200, { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: true });
+  if (USE_SUPABASE) {
+    const rows = await supabase(`/gifts?id=eq.${gift.id}&recipient_user_id=is.null`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ recipient_user_id: user.id, updated_at: new Date().toISOString() }) });
+    if (!rows.length) {
+      const current = await get("gifts", gift.id);
+      if (current?.recipientUserId === user.id) return sendJson(res, 200, { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: true });
+      return sendJson(res, 409, { error: "이 선물은 이미 다른 계정에 연결되어 있습니다." });
+    }
+  } else await update("gifts", gift.id, { recipientUserId: user.id });
+  return sendJson(res, 200, { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: false });
 }
 async function giftLogoutRoute(req, res) {
   const access = await authenticateGiftSession(req, res);
@@ -726,7 +748,7 @@ async function giftLogoutRoute(req, res) {
 async function giftSessionRoute(req, res) {
   const access = await authenticateGiftSession(req);
   if (!access) return sendJson(res, 401, { error: "선물 세션이 없거나 만료되었습니다." });
-  return sendJson(res, 200, { giftId: access.gift.id, bookId: access.book.id, sessionExpiresAt: access.session.expiresAt });
+  return sendJson(res, 200, { giftId: access.gift.id, bookId: access.book.id, receiver: access.book.receiver || "", sessionExpiresAt: access.session.expiresAt });
 }
 
 async function requireAdmin(req, res) {
@@ -1057,13 +1079,17 @@ async function authProfileRoute(req, res, method, body) {
   if (!displayName) return sendJson(res, 400, { error: "닉네임을 입력하세요." });
   if (displayName.length > 40) return sendJson(res, 400, { error: "닉네임은 40자 이하로 입력하세요." });
   if (!USE_SUPABASE) return sendJson(res, 200, { displayName });
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(user.id)}`, {
+  const response = await updateAuthUserName(user, displayName);
+  if (!response.ok) return sendJson(res, 502, { error: `닉네임을 저장할 수 없습니다: ${await response.text()}` });
+  return sendJson(res, 200, { displayName });
+}
+
+async function updateAuthUserName(user, displayName) {
+  return fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(user.id)}`, {
     method: "PUT",
     headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ user_metadata: { ...(user.user_metadata || {}), name: displayName } }),
   });
-  if (!response.ok) return sendJson(res, 502, { error: `닉네임을 저장할 수 없습니다: ${await response.text()}` });
-  return sendJson(res, 200, { displayName });
 }
 
 async function accountGiftsRoute(req, res) {
@@ -1110,11 +1136,20 @@ async function momentAuthorRoute(res, method, id, body) {
   if (USE_SUPABASE && !user) return sendJson(res, 404, { error: "Supabase Auth 사용자를 찾을 수 없습니다." });
   const existing = await findMomentAuthor(id);
   const isActive = method === "PATCH" && body.action === "toggle-active" ? !Boolean(existing?.isActive) : body.isActive !== false && body.isActive !== "false";
-  const displayName = String(user?.user_metadata?.name || user?.email || "사용자").trim();
+  const displayName = String(body.displayName || "").trim();
+  if (Object.hasOwn(body, "displayName")) {
+    if (!displayName) return sendJson(res, 400, { error: "닉네임을 입력하세요." });
+    if (displayName.length > 40) return sendJson(res, 400, { error: "닉네임은 40자 이하로 입력하세요." });
+    if (USE_SUPABASE) {
+      const response = await updateAuthUserName(user, displayName);
+      if (!response.ok) return sendJson(res, 502, { error: `닉네임을 저장할 수 없습니다: ${await response.text()}` });
+    }
+  }
+  const authorDisplayName = String(user?.user_metadata?.name || user?.email || "사용자").trim();
   const author = existing
-    ? await update("momentAuthors", id, { ...(Object.hasOwn(body, "displayName") ? { displayName: String(body.displayName).trim() } : {}), isActive })
-    : await create("momentAuthors", { id, displayName, role: "author", isActive });
-  return sendJson(res, 200, { id: author.id, displayName: author.displayName, role: author.role, isActive: author.isActive, email: user?.email || "" });
+    ? await update("momentAuthors", id, { isActive })
+    : await create("momentAuthors", { id, displayName: authorDisplayName, role: "author", isActive });
+  return sendJson(res, 200, { id: author.id, displayName: Object.hasOwn(body, "displayName") ? displayName : authorDisplayName, role: author.role, isActive: author.isActive, email: user?.email || "" });
 }
 
 async function findMomentAuthor(id) { return (await list("momentAuthors")).find((author) => author.id === id) || null; }
@@ -1138,7 +1173,7 @@ async function listMomentAuthorUsers() {
   const byId = new Map(authors.map((author) => [author.id, author]));
   return users.map((user) => {
     const author = byId.get(user.id);
-    return { id: user.id, email: user.email || "", displayName: author?.displayName || user.user_metadata?.name || user.email || "사용자", isAuthor: Boolean(author), isActive: Boolean(author?.isActive), createdAt: author?.createdAt || user.created_at || null };
+    return { id: user.id, email: user.email || "", displayName: user.user_metadata?.name || user.email || "사용자", isAuthor: Boolean(author), isActive: Boolean(author?.isActive), createdAt: author?.createdAt || user.created_at || null };
   });
 }
 
@@ -1320,8 +1355,13 @@ async function presentCoverOptions() { return { colors: await presentCoverColors
 function presentCoverColor(color) { return { ...color }; }
 function presentCoverImage(image) { return { ...image, imageUrl: image.imagePath?.startsWith("data:") || image.imagePath?.startsWith("/") ? image.imagePath : publicCoverImageUrl(image.imagePath) }; }
 async function presentBooks(ownerId = null) {
-  const giftedBookIds = ownerId ? new Set((await list("gifts")).map((gift) => Number(gift.bookId))) : new Set();
-  return Promise.all((await list("books")).filter((book) => (!ownerId || book.ownerId === ownerId) && !giftedBookIds.has(Number(book.id))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((book) => presentBook(book)));
+  const gifts = ownerId ? await list("gifts") : [];
+  const giftsByBookId = new Map(gifts.map((gift) => [Number(gift.bookId), gift]));
+  return Promise.all((await list("books")).filter((book) => {
+    if (!ownerId) return true;
+    const gift = giftsByBookId.get(Number(book.id));
+    return gift ? gift.recipientUserId === ownerId : book.ownerId === ownerId;
+  }).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((book) => presentBook(book)));
 }
 async function presentBooksForGift(giftId) { const gift = await get("gifts", giftId); if (!gift || gift.status !== "active" || gift.revokedAt) return []; const book = await get("books", gift.bookId); return book ? [await presentBook(book)] : []; }
 async function presentAdminGifts() {
@@ -1664,7 +1704,7 @@ function linkMap(row) { return { id: row.id || `${row.book_type_id}-${row.questi
 function bookMap(row) { return { id: row.id, ownerId: row.owner_id || null, bookTypeId: row.book_type_id, title: row.title, sender: row.sender || "", receiver: row.receiver || "", introduction: row.introduction || "", isSelf: row.is_self === true, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, lastAccessedAt: row.last_accessed_at || null, previewAllowed: row.preview_allowed === true, publishedAt: row.published_at }; } bookMap.from = bookMap; bookMap.to = (v) => fields(v, { ownerId: "owner_id", bookTypeId: "book_type_id", title: "title", sender: "sender", receiver: "receiver", introduction: "introduction", isSelf: "is_self", status: "status", updatedAt: "updated_at", lastAccessedAt: "last_accessed_at", previewAllowed: "preview_allowed", publishedAt: "published_at" });
 function answerMap(row) { return { id: row.id, myBookId: row.my_book_id, questionId: row.question_id, answer: row.answer || "", isFinal: row.is_final, createdAt: row.created_at, updatedAt: row.updated_at }; } answerMap.from = answerMap; answerMap.to = (v) => fields(v, { myBookId: "my_book_id", questionId: "question_id", answer: "answer", isFinal: "is_final", updatedAt: "updated_at" });
 function publicationMap(row) { return { id: row.id, myBookId: row.my_book_id, coverStyle: row.cover_style, coverColor: row.cover_color || null, coverImage: row.cover_image || null, createdAt: row.created_at }; } publicationMap.from = publicationMap; publicationMap.to = (v) => fields(v, { myBookId: "my_book_id", coverStyle: "cover_style", coverColor: "cover_color", coverImage: "cover_image" });
-function giftMap(row) { return { id: row.id, bookId: row.book_id, senderUserId: row.sender_user_id || null, senderEmail: row.sender_email || null, status: row.status, giftCodeHash: row.gift_code_hash, codeVersion: row.code_version, initialDeliveryMethod: row.initial_delivery_method || null, createdAt: row.created_at, updatedAt: row.updated_at, lastAccessedAt: row.last_accessed_at, codeIssuedAt: row.code_issued_at, revokedAt: row.revoked_at }; } giftMap.from = giftMap; giftMap.to = (v) => fields(v, { bookId: "book_id", senderUserId: "sender_user_id", senderEmail: "sender_email", status: "status", giftCodeHash: "gift_code_hash", codeVersion: "code_version", initialDeliveryMethod: "initial_delivery_method", updatedAt: "updated_at", lastAccessedAt: "last_accessed_at", codeIssuedAt: "code_issued_at", revokedAt: "revoked_at" });
+function giftMap(row) { return { id: row.id, bookId: row.book_id, senderUserId: row.sender_user_id || null, recipientUserId: row.recipient_user_id || null, senderEmail: row.sender_email || null, status: row.status, giftCodeHash: row.gift_code_hash, codeVersion: row.code_version, initialDeliveryMethod: row.initial_delivery_method || null, createdAt: row.created_at, updatedAt: row.updated_at, lastAccessedAt: row.last_accessed_at, codeIssuedAt: row.code_issued_at, revokedAt: row.revoked_at }; } giftMap.from = giftMap; giftMap.to = (v) => fields(v, { bookId: "book_id", senderUserId: "sender_user_id", recipientUserId: "recipient_user_id", senderEmail: "sender_email", status: "status", giftCodeHash: "gift_code_hash", codeVersion: "code_version", initialDeliveryMethod: "initial_delivery_method", updatedAt: "updated_at", lastAccessedAt: "last_accessed_at", codeIssuedAt: "code_issued_at", revokedAt: "revoked_at" });
 function giftShareTokenMap(row) { return { id: row.id, giftId: row.gift_id, tokenHash: row.token_hash, createdAt: row.created_at, revokedAt: row.revoked_at || null }; } giftShareTokenMap.from = giftShareTokenMap; giftShareTokenMap.to = (v) => fields(v, { giftId: "gift_id", tokenHash: "token_hash", revokedAt: "revoked_at" });
 function giftDeliveryMap(row) { return { id: row.id, giftId: row.gift_id, method: row.method, createdAt: row.created_at, metadata: row.metadata || null }; } giftDeliveryMap.from = giftDeliveryMap; giftDeliveryMap.to = (v) => fields(v, { giftId: "gift_id", method: "method", createdAt: "created_at", metadata: "metadata" });
 function giftSessionMap(row) { return { id: row.id, giftId: row.gift_id, sessionTokenHash: row.session_token_hash, createdAt: row.created_at, lastAccessedAt: row.last_accessed_at, expiresAt: row.expires_at, revokedAt: row.revoked_at, userAgent: row.user_agent || null }; } giftSessionMap.from = giftSessionMap; giftSessionMap.to = (v) => fields(v, { id: "id", giftId: "gift_id", sessionTokenHash: "session_token_hash", lastAccessedAt: "last_accessed_at", expiresAt: "expires_at", revokedAt: "revoked_at", userAgent: "user_agent" });
