@@ -3,7 +3,7 @@ const toast = document.querySelector("#toast");
 const topbar = document.querySelector("#topbar");
 const DEFAULT_BOOK_TITLE = "오래보고 자세히 보면 모두 어여쁜 인생입니다";
 const DEFAULT_RECIPIENT_MESSAGE = "내 곁에 있어 주셔서 감사합니다.\n꼭 하고 싶었던 말을 이제서야 드립니다.\n당신을 사랑합니다.";
-const state = { createType: null, createStep: 1, currentBook: null, currentUserId: null, authKind: null, giftSession: null, giftAccountLoginRequested: false, autoSave: null, bookWritingFull: false, giftCreateType: null, giftCreateStep: 1, giftDraft: null, giftCover: null, giftResult: null, giftSubmitting: false, giftCopyTimer: null, profileSaved: false, renderId: 0, writingBooksCache: null, gnbSignature: "", mobileMenuOpen: false, mobileStoryOpen: false };
+const state = { createType: null, createStep: 1, currentBook: null, currentAuth: null, currentUserId: null, authKind: null, giftSession: null, giftAccountLoginRequested: false, autoSave: null, bookWritingFull: false, giftCreateType: null, giftCreateStep: 1, giftDraft: null, giftCover: null, giftResult: null, giftSubmitting: false, giftCopyTimer: null, profileSaved: false, renderId: 0, writingBooksCache: null, gnbSignature: "", mobileMenuOpen: false, mobileStoryOpen: false };
 const createClient = window.supabase?.createClient;
 let authClient = null;
 let authReady = null;
@@ -237,6 +237,7 @@ async function onProfileSubmit(event) {
   try {
     const data = Object.fromEntries(new FormData(form));
     await authedApi("/api/auth/profile", { method: "PUT", body: { displayName: data.displayName } });
+    state.currentAuth = null;
     state.profileSaved = true;
     toastMsg("닉네임을 저장했습니다.");
     await render();
@@ -246,6 +247,7 @@ async function onProfileSubmit(event) {
 async function connectGiftSession() {
   try { await api("/api/gifts/session"); } catch { return null; }
   const result = await authedApi("/api/gifts/claim", { method: "POST" });
+  state.currentAuth = null;
   clearWritingBooksCache();
   return result;
 }
@@ -260,6 +262,7 @@ async function onAccountLoginSubmit(event) {
     const client = await ensureAuthClient();
     const { error } = await client.auth.signInWithPassword({ email: data.email, password: data.password });
     if (error) throw error;
+    state.currentAuth = null;
     await connectGiftSession();
     location.hash = "#books";
   } catch (error) { toastMsg(error.message); }
@@ -275,7 +278,7 @@ async function startApp() {
 
 async function ensureAuthClient() {
   if (authReady) return authReady;
-  authReady = fetch("/api/auth/config").then(async (response) => { const config = await response.json(); if (!response.ok) throw new Error(config.error || "Supabase Auth 설정을 불러올 수 없습니다."); if (!createClient) throw new Error("Supabase Auth client를 불러오지 못했습니다."); authClient = createClient(config.url, config.anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }); return authClient; });
+  authReady = fetch("/api/auth/config").then(async (response) => { const config = await response.json(); if (!response.ok) throw new Error(config.error || "Supabase Auth 설정을 불러올 수 없습니다."); if (!createClient) throw new Error("Supabase Auth client를 불러오지 못했습니다."); authClient = createClient(config.url, config.anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }); authClient.auth.onAuthStateChange((event) => { if (["SIGNED_IN", "SIGNED_OUT", "TOKEN_REFRESHED", "USER_UPDATED"].includes(event)) state.currentAuth = null; }); return authClient; });
   return authReady;
 }
 
@@ -296,8 +299,8 @@ async function loadAuthState() {
   } catch { return { session: null, user: null, isAdmin: false, moments: { canWrite: false }, authKind: null, giftSession: null }; }
 }
 
-async function login(renderId = state.renderId) {
-  const auth = await loadAuthState();
+async function login(renderId = state.renderId, auth = state.currentAuth) {
+  auth = auth || await loadAuthState();
   if (!isCurrentRender(renderId)) return;
   if (auth.session) {
     app.innerHTML = `<section class="author-login"><div class="eyebrow">MY STORY</div><h1 class="admin-title">${escapeHtml(auth.user?.displayName || "사용자")}님</h1><p class="lead">로그인된 계정으로 서비스를 이용하고 있습니다.</p><div class="actions">${auth.moments?.canWrite ? `<a class="button primary" href="#moments">Moments</a>` : ""}<a class="button ghost" href="#books">내 이야기</a><button class="button ghost" data-logout>로그아웃</button></div></section>`;
@@ -325,6 +328,7 @@ async function onGiftLoginSubmit(event) {
     const result = await api("/api/gifts/login", { method: "POST", body: { code } });
     codeInput.value = "";
     if (!result?.bookId) throw new Error("선물받은 책을 찾을 수 없습니다.");
+    state.currentAuth = null;
     state.authKind = "gift";
     state.giftSession = { giftId: result.giftId, bookId: result.bookId, sessionExpiresAt: result.sessionExpiresAt };
     location.hash = "#books";
@@ -336,8 +340,8 @@ async function onGiftLoginSubmit(event) {
   }
 }
 
-async function moments(renderId = state.renderId) {
-  const auth = await loadAuthState();
+async function moments(renderId = state.renderId, auth = state.currentAuth) {
+  auth = auth || await loadAuthState();
   if (!isCurrentRender(renderId)) return;
   if (!auth.session) { location.hash = "#login"; return; }
   if (!auth.moments?.canWrite) {
@@ -405,7 +409,8 @@ async function render() {
   const divider = document.querySelector("#gnb-divider");
   if (divider) divider.src = route === "books" || route === "book" ? "/assets/gnb-divider-brown.svg" : "/assets/gnb-divider.svg";
   try {
-    const auth = await loadAuthState();
+    const auth = state.currentAuth || await loadAuthState();
+    state.currentAuth = auth;
     state.currentUserId = auth.session?.user?.id || null;
     state.authKind = auth.authKind || (auth.session ? "account" : null);
     state.giftSession = auth.giftSession || null;
@@ -420,11 +425,11 @@ async function render() {
     if (route === "book") { const pageParam = params[1] || ""; const page = pageParam.startsWith("group-") ? { type: "group", groupId: Number(pageParam.slice(6)) } : pageParam.startsWith("question-") ? { type: "question", questionId: Number(pageParam.slice(9)) } : pageParam ? { type: "question", questionId: Number(pageParam) } : null; return book(Number(params[0]), page); }
     if (route === "write") return write(Number(params[0]), Number(params[1]), renderId);
     if (route === "publish") return publish(Number(params[0]), renderId);
-    if (route === "login") return login(renderId);
-    if (route === "profile") return profileFinal(renderId);
-    if (route === "moments") return moments(renderId);
+    if (route === "login") return login(renderId, auth);
+    if (route === "profile") return profileFinal(renderId, auth);
+    if (route === "moments") return moments(renderId, auth);
     if (route === "moments-detail") return momentsDetail(renderId);
-    if (route === "author") return params[0] === "moments" ? moments(renderId) : login(renderId);
+    if (route === "author") return params[0] === "moments" ? moments(renderId, auth) : login(renderId, auth);
     if (route === "admin") return admin(params[0] || "dashboard", renderId);
     location.hash = "#home";
   } catch (error) { if (renderId === state.renderId) app.innerHTML = `<div class="panel empty">${escapeHtml(error.message)}</div>`; }
@@ -697,8 +702,8 @@ async function books(renderId = state.renderId) {
   app.innerHTML = `<section class="books-page ${giftOnly ? "gift-only-books" : ""}"><div class="books-description"><span class="books-subject">내 이야기</span><div class="books-description-row"><div class="books-lead">나에게 맞는 속도로 언제든 편하게 작성하고 저장하세요.<br> 이미 작성이 완료된 이야기도 다시 수정할 수 있어요.</div>${createAction}</div></div>${items.length ? `<div class="my-books-grid">${cards}</div>` : `<div class="panel empty"><h2>아직 만든 책이 없어요.</h2><p>첫 번째 이야기를 시작해 보세요.</p>${emptyAction}</div>`}</section>`;
 }
 
-async function profile() {
-  const auth = await loadAuthState();
+async function profile(auth = state.currentAuth) {
+  auth = auth || await loadAuthState();
   if (!auth.session) { location.hash = "#login"; return; }
   const gifts = await authedApi("/api/account/gifts");
   const typeCode = (name) => ({ Parents: "P", "Single Parent": "SP", Couple: "C", Single: "S" }[name] || name || "-");
@@ -1205,7 +1210,7 @@ async function onClick(e) {
   if (el.dataset.adminGiftDelete) return deleteAdminGift(el.dataset.adminGiftDelete, el.closest(".modal"));
   if (el.dataset.dashboardApply !== undefined) { const box = el.closest(".admin-page") || document; return loadAdminDashboard("custom", box.querySelector("[data-dashboard-from]")?.value, box.querySelector("[data-dashboard-to]")?.value); }
   if ("giftLogout" in el.dataset) {
-    try { await api("/api/gifts/logout", { method: "POST" }); state.giftSession = null; location.hash = "#login"; }
+    try { await api("/api/gifts/logout", { method: "POST" }); state.currentAuth = null; state.giftSession = null; location.hash = "#login"; }
     catch (error) { return toastMsg(error.message); }
   }
   if (el.dataset.giftAccountContinue !== undefined) { state.giftAccountLoginRequested = true; location.hash = "#login"; return; }
@@ -1255,7 +1260,7 @@ async function onClick(e) {
   if (el.hasAttribute("data-google-login")) { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${location.origin}/` } }); if (error) toastMsg(error.message); }
   if (el.hasAttribute("data-kakao-login")) { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithOAuth({ provider: "kakao", options: { redirectTo: `${location.origin}/` } }); if (error) toastMsg(error.message); }
   if (el.hasAttribute("data-naver-login")) { window.location.href = "/auth/naver"; return; }
-  if ("logout" in el.dataset) { console.debug("[My Story] logout click received", { target: el.outerHTML, currentHash: location.hash }); try { const client = await ensureAuthClient(); console.debug("[My Story] calling Supabase signOut"); const result = await client.auth.signOut(); console.debug("[My Story] signOut result", { error: result.error?.message || null, dataHasSession: Boolean(result.data?.session) }); if (result.error) throw result.error; const sessionAfterSignOut = await getAuthSession(); console.debug("[My Story] session after signOut", { sessionExists: Boolean(sessionAfterSignOut) }); clearWritingBooksCache(); state.authorEditingId = null; if (location.hash === "#home" || location.hash === "") { console.debug("[My Story] rendering logged-out UI"); return render(); } console.debug("[My Story] routing to #home for logged-out UI"); location.hash = "#home"; } catch (error) { console.error("[My Story] logout failed", { name: error.name, message: error.message }); toastMsg(`로그아웃에 실패했습니다: ${error.message}`); } return; }
+  if ("logout" in el.dataset) { console.debug("[My Story] logout click received", { target: el.outerHTML, currentHash: location.hash }); try { const client = await ensureAuthClient(); console.debug("[My Story] calling Supabase signOut"); const result = await client.auth.signOut(); console.debug("[My Story] signOut result", { error: result.error?.message || null, dataHasSession: Boolean(result.data?.session) }); if (result.error) throw result.error; const sessionAfterSignOut = await getAuthSession(); console.debug("[My Story] session after signOut", { sessionExists: Boolean(sessionAfterSignOut) }); state.currentAuth = null; clearWritingBooksCache(); state.authorEditingId = null; if (location.hash === "#home" || location.hash === "") { console.debug("[My Story] rendering logged-out UI"); return render(); } console.debug("[My Story] routing to #home for logged-out UI"); location.hash = "#home"; } catch (error) { console.error("[My Story] logout failed", { name: error.name, message: error.message }); toastMsg(`로그아웃에 실패했습니다: ${error.message}`); } return; }
   if (el.dataset.authorEdit) { state.authorEditingId = Number(el.dataset.authorEdit); return moments(); }
   if ("authorCancelEdit" in el.dataset) { state.authorEditingId = null; return moments(); }
   if (el.dataset.editQuestion) openEdit("question", el.dataset.editQuestion); if (el.dataset.editGroup) openEdit("group", el.dataset.editGroup); if (el.dataset.editType) openEdit("type", el.dataset.editType); if (el.dataset.editCoverColor) openEdit("cover-color", el.dataset.editCoverColor); if (el.dataset.editCoverImage) openEdit("cover-image", el.dataset.editCoverImage); if (el.dataset.editReview) openEdit("review", el.dataset.editReview); if (el.dataset.editMoment) openEdit("moment", el.dataset.editMoment); if (el.dataset.editBanner) openEdit("banner", decodeURIComponent(el.dataset.editBanner));
@@ -1480,8 +1485,8 @@ const adminStatusSelectObserver = new MutationObserver(removeAdminStatusSelects)
 adminStatusSelectObserver.observe(document.body, { childList: true, subtree: true });
 removeAdminStatusSelects();
 
-async function profileFinal(renderId = state.renderId) {
-  const auth = await loadAuthState();
+async function profileFinal(renderId = state.renderId, auth = state.currentAuth) {
+  auth = auth || await loadAuthState();
   if (!isCurrentRender(renderId)) return;
   if (!auth.session && auth.authKind === "gift" && auth.giftSession?.bookId) {
     app.innerHTML = `<section class="author-login gift-account-choice"><div class="eyebrow">MY STORY</div><h1 class="admin-title">${escapeHtml(auth.giftSession.receiver || "수령자")}님의 선물 이야기를 작성 중입니다.</h1><p class="lead">지금은 선물 전용 접속으로 이용하고 있습니다.<br>계정으로 로그인하면 작성 중인 선물 이야기가 내 계정에 연결되고, 이후에는 로그인만으로 계속 작성할 수 있습니다.</p><div class="actions"><a class="button primary" href="#login" data-gift-account-continue>계정으로 계속하기</a><a class="button ghost" href="#books" data-gift-continue>선물로 계속하기</a><button class="button ghost" data-gift-logout>로그아웃</button></div></section>`;
