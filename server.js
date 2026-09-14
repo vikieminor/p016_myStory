@@ -445,6 +445,11 @@ async function giftShareReceiveRoute(req, res, token) {
   if (!gift) return sendText(res, 404, "유효하지 않거나 폐기된 선물 링크입니다.");
   const book = await get("books", gift.bookId);
   if (!book) return sendText(res, 404, "선물받은 책을 찾을 수 없습니다.");
+  const user = await authenticatedUser(req);
+  if (user) {
+    const claim = await claimGiftForAccount(user, { kind: "gift", gift, book, session: null });
+    if (claim.status !== 200) return sendJson(res, claim.status, claim.body);
+  }
   const { token: sessionToken, session } = await createGiftSession(gift, req);
   res.writeHead(303, { Location: "/#books", "Set-Cookie": giftCookieHeader(sessionToken, req) });
   res.end();
@@ -734,21 +739,25 @@ async function claimGiftRoute(req, res) {
   const user = await authenticatedUser(req);
   if (!user) return sendJson(res, 401, { error: "계정 로그인이 필요합니다." });
   const access = await authenticateGiftSession(req, res);
-  if (!access) return sendJson(res, 401, { error: "연결할 선물 세션이 없거나 만료되었습니다." });
+  const claim = await claimGiftForAccount(user, access);
+  return sendJson(res, claim.status, claim.body);
+}
+async function claimGiftForAccount(user, access) {
+  if (!access) return { status: 401, body: { error: "연결할 선물 세션이 없거나 만료되었습니다." } };
   const gift = await get("gifts", access.gift.id);
   const book = gift ? await get("books", gift.bookId) : null;
-  if (!gift || !book || gift.bookId !== access.book.id || access.gift.bookId !== book.id) return sendJson(res, 403, { error: "선물과 책의 연결을 확인할 수 없습니다." });
-  if (gift.recipientUserId && gift.recipientUserId !== user.id) return sendJson(res, 409, { error: "이 선물은 이미 다른 계정에 연결되어 있습니다." });
-  if (gift.recipientUserId === user.id) return sendJson(res, 200, { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: true });
+  if (!gift || !book || gift.bookId !== access.book.id || access.gift.bookId !== book.id) return { status: 403, body: { error: "선물과 책의 연결을 확인할 수 없습니다." } };
+  if (gift.recipientUserId && gift.recipientUserId !== user.id) return { status: 409, body: { error: "이 선물은 이미 다른 계정에 연결되어 있습니다." } };
+  if (gift.recipientUserId === user.id) return { status: 200, body: { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: true } };
   if (USE_SUPABASE) {
     const rows = await supabase(`/gifts?id=eq.${gift.id}&recipient_user_id=is.null`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ recipient_user_id: user.id, updated_at: new Date().toISOString() }) });
     if (!rows.length) {
       const current = await get("gifts", gift.id);
-      if (current?.recipientUserId === user.id) return sendJson(res, 200, { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: true });
-      return sendJson(res, 409, { error: "이 선물은 이미 다른 계정에 연결되어 있습니다." });
+      if (current?.recipientUserId === user.id) return { status: 200, body: { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: true } };
+      return { status: 409, body: { error: "이 선물은 이미 다른 계정에 연결되어 있습니다." } };
     }
   } else await update("gifts", gift.id, { recipientUserId: user.id });
-  return sendJson(res, 200, { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: false });
+  return { status: 200, body: { ok: true, giftId: gift.id, bookId: book.id, alreadyConnected: false } };
 }
 async function giftLogoutRoute(req, res) {
   const access = await authenticateGiftSession(req, res);
