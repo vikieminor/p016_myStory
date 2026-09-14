@@ -1266,7 +1266,7 @@ async function onClick(e) {
     console.debug("[My Story] logout click received", { target: el.outerHTML, currentHash: location.hash });
     if (!(await saveCurrentAnswerBeforeLeave())) return;
     if ("giftLogout" in el.dataset || (state.authKind === "gift" && state.giftSession?.bookId)) {
-      try { await api("/api/gifts/logout", { method: "POST" }); state.currentAuth = null; state.giftSession = null; state.giftAccountLoginRequested = false; location.hash = "#login"; }
+      try { await api("/api/gifts/logout", { method: "POST" }); state.currentAuth = null; state.giftSession = null; state.giftAccountLoginRequested = false; location.hash = "#home"; }
       catch (error) { return toastMsg(error.message); }
       return;
     }
