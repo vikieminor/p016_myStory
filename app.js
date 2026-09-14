@@ -539,7 +539,6 @@ function renderTopGnb(auth, writingBooks = []) {
   const storyMenu = `<div class="home-story-menu"><a class="home-story-link" href="#books" aria-haspopup="true">내 이야기</a><div class="home-story-popover" role="menu" aria-label="내 이야기 목록">${storyBooks}</div></div>`;
   const createItem = `<a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a>`;
   const profileMenu = `<div class="home-profile-menu"><a class="home-profile-link home-icon-link" href="#profile" aria-label="프로필 메뉴" aria-haspopup="true"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a><div class="home-profile-popover" role="menu" aria-label="프로필 메뉴"><a href="#profile" role="menuitem">프로필</a><button class="home-nav-action" data-logout role="menuitem">로그아웃</button></div></div>`;
-  const giftProfileMenu = `<div class="home-profile-menu"><a class="home-profile-link home-icon-link" href="#profile" aria-label="프로필 메뉴" aria-haspopup="true"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a><div class="home-profile-popover" role="menu" aria-label="프로필 메뉴"><a href="#profile" role="menuitem">프로필</a></div></div>`;
   const mobileStoryBooks = writingBooks.length
     ? `<div class="mobile-story-books" id="mobile-story-books" data-mobile-story-panel role="menu" aria-label="내 이야기 책 목록" hidden>${writingBooks.map((book) => `<a href="#book/${book.id}/${book.resumePage}" data-mobile-menu-item role="menuitem">${escapeHtml(book.title)}</a>`).join("")}</div>`
     : "";
@@ -547,12 +546,12 @@ function renderTopGnb(auth, writingBooks = []) {
   const mobileMenu = loggedIn
     ? `${mobileStoryMenu}<a href="#create" data-mobile-menu-item>새 이야기 만들기</a><a href="#gift-create" data-mobile-menu-item>선물하기</a><a href="#" data-store-link data-mobile-menu-item>스토어</a><a href="#profile" data-mobile-menu-item>계정</a><button type="button" data-logout data-mobile-menu-item>로그아웃</button>`
     : giftLoggedIn
-      ? `${mobileStoryMenu}<a href="#" data-store-link data-mobile-menu-item>스토어</a><a href="#profile" data-mobile-menu-item>프로필</a>`
+      ? `${mobileStoryMenu}<a href="#" data-store-link data-mobile-menu-item>스토어</a><a href="#profile" data-mobile-menu-item>프로필</a><button type="button" data-logout data-mobile-menu-item>로그아웃</button>`
       : `<a href="#login" data-mobile-menu-item>로그인</a><a href="#" data-store-link data-mobile-menu-item>스토어</a>`;
   const menu = loggedIn
     ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span>${createItem}<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>${auth.moments?.canWrite === true ? `<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#moments" aria-label="Moments"><img src="/assets/icn_time.svg" alt="" aria-hidden="true"></a>` : ""}${isAdmin ? `<span class="home-divider" aria-hidden="true"></span><a href="#admin/dashboard">관리자</a>` : ""}<span class="home-divider" aria-hidden="true"></span>${profileMenu}`
     : giftLoggedIn
-      ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span>${giftProfileMenu}`
+      ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span>${profileMenu}`
       : `<a href="#login">로그인</a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>`;
   const mobileProfileLink = mobileLoggedOut ? `<a class="mobile-profile-link" href="#login" aria-label="로그인"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a>` : "";
   const mobileStoreLink = mobileLoggedOut ? `<a class="mobile-store-link home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>` : "";
@@ -1216,11 +1215,6 @@ async function onClick(e) {
   if (el.dataset.adminGiftDetail) return openAdminGiftDetail(el.dataset.adminGiftDetail);
   if (el.dataset.adminGiftDelete) return deleteAdminGift(el.dataset.adminGiftDelete, el.closest(".modal"));
   if (el.dataset.dashboardApply !== undefined) { const box = el.closest(".admin-page") || document; return loadAdminDashboard("custom", box.querySelector("[data-dashboard-from]")?.value, box.querySelector("[data-dashboard-to]")?.value); }
-  if ("giftLogout" in el.dataset) {
-    if (!(await saveCurrentAnswerBeforeLeave())) return;
-    try { await api("/api/gifts/logout", { method: "POST" }); state.currentAuth = null; state.giftSession = null; location.hash = "#login"; }
-    catch (error) { return toastMsg(error.message); }
-  }
   if (el.dataset.giftAccountContinue !== undefined) { state.giftAccountLoginRequested = true; location.hash = "#login"; return; }
   if (el.dataset.giftContinue !== undefined) return;
   if (el.dataset.go) location.hash = `#${el.dataset.go}`;
@@ -1268,7 +1262,17 @@ async function onClick(e) {
   if (el.hasAttribute("data-google-login")) { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${location.origin}/` } }); if (error) toastMsg(error.message); }
   if (el.hasAttribute("data-kakao-login")) { const client = await ensureAuthClient(); const { error } = await client.auth.signInWithOAuth({ provider: "kakao", options: { redirectTo: `${location.origin}/` } }); if (error) toastMsg(error.message); }
   if (el.hasAttribute("data-naver-login")) { window.location.href = "/auth/naver"; return; }
-  if ("logout" in el.dataset) { console.debug("[My Story] logout click received", { target: el.outerHTML, currentHash: location.hash }); if (!(await saveCurrentAnswerBeforeLeave())) return; try { const client = await ensureAuthClient(); console.debug("[My Story] calling Supabase signOut"); const result = await client.auth.signOut(); console.debug("[My Story] signOut result", { error: result.error?.message || null, dataHasSession: Boolean(result.data?.session) }); if (result.error) throw result.error; const sessionAfterSignOut = await getAuthSession(); console.debug("[My Story] session after signOut", { sessionExists: Boolean(sessionAfterSignOut) }); state.currentAuth = null; clearWritingBooksCache(); state.authorEditingId = null; if (location.hash === "#home" || location.hash === "") { console.debug("[My Story] rendering logged-out UI"); return render(); } console.debug("[My Story] routing to #home for logged-out UI"); location.hash = "#home"; } catch (error) { console.error("[My Story] logout failed", { name: error.name, message: error.message }); toastMsg(`로그아웃에 실패했습니다: ${error.message}`); } return; }
+  if ("logout" in el.dataset || "giftLogout" in el.dataset) {
+    console.debug("[My Story] logout click received", { target: el.outerHTML, currentHash: location.hash });
+    if (!(await saveCurrentAnswerBeforeLeave())) return;
+    if ("giftLogout" in el.dataset || (state.authKind === "gift" && state.giftSession?.bookId)) {
+      try { await api("/api/gifts/logout", { method: "POST" }); state.currentAuth = null; state.giftSession = null; state.giftAccountLoginRequested = false; location.hash = "#login"; }
+      catch (error) { return toastMsg(error.message); }
+      return;
+    }
+    try { const client = await ensureAuthClient(); console.debug("[My Story] calling Supabase signOut"); const result = await client.auth.signOut(); console.debug("[My Story] signOut result", { error: result.error?.message || null, dataHasSession: Boolean(result.data?.session) }); if (result.error) throw result.error; const sessionAfterSignOut = await getAuthSession(); console.debug("[My Story] session after signOut", { sessionExists: Boolean(sessionAfterSignOut) }); state.currentAuth = null; clearWritingBooksCache(); state.authorEditingId = null; if (location.hash === "#home" || location.hash === "") { console.debug("[My Story] rendering logged-out UI"); return render(); } console.debug("[My Story] routing to #home for logged-out UI"); location.hash = "#home"; } catch (error) { console.error("[My Story] logout failed", { name: error.name, message: error.message }); toastMsg(`로그아웃에 실패했습니다: ${error.message}`); }
+    return;
+  }
   if (el.dataset.authorEdit) { state.authorEditingId = Number(el.dataset.authorEdit); return moments(); }
   if ("authorCancelEdit" in el.dataset) { state.authorEditingId = null; return moments(); }
   if (el.dataset.editQuestion) openEdit("question", el.dataset.editQuestion); if (el.dataset.editGroup) openEdit("group", el.dataset.editGroup); if (el.dataset.editType) openEdit("type", el.dataset.editType); if (el.dataset.editCoverColor) openEdit("cover-color", el.dataset.editCoverColor); if (el.dataset.editCoverImage) openEdit("cover-image", el.dataset.editCoverImage); if (el.dataset.editReview) openEdit("review", el.dataset.editReview); if (el.dataset.editMoment) openEdit("moment", el.dataset.editMoment); if (el.dataset.editBanner) openEdit("banner", decodeURIComponent(el.dataset.editBanner));
@@ -1497,7 +1501,7 @@ async function profileFinal(renderId = state.renderId, auth = state.currentAuth)
   auth = auth || await loadAuthState();
   if (!isCurrentRender(renderId)) return;
   if (!auth.session && auth.authKind === "gift" && auth.giftSession?.bookId) {
-    app.innerHTML = `<section class="author-login gift-account-choice"><div class="eyebrow">MY STORY</div><h1 class="admin-title">${escapeHtml(auth.giftSession.receiver || "수령자")}님의 선물 이야기를 작성 중입니다.</h1><p class="lead">지금은 선물 전용 접속으로 이용하고 있습니다.<br>계정으로 로그인하면 작성 중인 선물 이야기가 내 계정에 연결되고, 이후에는 로그인만으로 계속 작성할 수 있습니다.</p><div class="actions"><a class="button primary" href="#login" data-gift-account-continue>계정으로 계속하기</a><a class="button ghost" href="#books" data-gift-continue>선물로 계속하기</a><button class="button ghost" data-gift-logout>로그아웃</button></div></section>`;
+    app.innerHTML = `<section class="author-login gift-account-choice"><div class="eyebrow">MY STORY</div><h1 class="admin-title">${escapeHtml(auth.giftSession.receiver || "수령자")}님의 선물 이야기를 작성 중입니다.</h1><p class="lead">지금은 선물 전용 접속으로 이용하고 있습니다.<br>계정으로 로그인하면 작성 중인 선물 이야기가 내 계정에 연결되고, 이후에는 로그인만으로 계속 작성할 수 있습니다.</p><div class="actions"><a class="button primary" href="#login" data-gift-account-continue>회원 로그인 후 계속하기</a><a class="button ghost" href="#books" data-gift-continue>선물계정으로 계속하기</a></div></section>`;
     return;
   }
   if (!auth.session) { location.hash = "#login"; return; }
