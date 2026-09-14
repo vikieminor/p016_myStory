@@ -300,6 +300,7 @@ async function loadAuthState() {
     return { session: null, user: null, isAdmin: false, moments: { canWrite: false }, authKind: "gift", giftSession };
   } catch { return { session: null, user: null, isAdmin: false, moments: { canWrite: false }, authKind: null, giftSession: null }; }
 }
+function hasActiveUser(auth) { return Boolean(auth?.session || (auth?.authKind === "gift" && auth?.giftSession?.bookId)); }
 
 async function login(renderId = state.renderId, auth = state.currentAuth) {
   auth = auth || await loadAuthState();
@@ -418,7 +419,7 @@ async function render() {
     state.giftSession = auth.giftSession || null;
     if (renderId !== state.renderId) return;
     renderTopGnb(auth, state.writingBooksCache?.books || []);
-    if (auth.session) getWritingBooks(auth).then((writingBooks) => { if (renderId === state.renderId) renderTopGnb(auth, writingBooks); });
+    if (hasActiveUser(auth)) getWritingBooks(auth).then((writingBooks) => { if (renderId === state.renderId) renderTopGnb(auth, writingBooks); });
     if (route === "admin" && auth.isAdmin !== true) { location.hash = "#home"; return; }
     if (route === "home") return home(renderId, auth);
     if (route === "books") return books(renderId);
@@ -446,7 +447,7 @@ async function fetchWritingBooks(auth) {
     try {
       const detail = await api(`/api/books/${book.id}`);
       const questions = detail.outline.groups.flatMap((group) => group.questions);
-      const lastQuestionId = readLastBookQuestion(auth.session.user.id, book.id);
+      const lastQuestionId = auth.session?.user?.id ? readLastBookQuestion(auth.session.user.id, book.id) : "";
       const lastQuestion = questions.find((question) => String(question.id) === String(lastQuestionId)) || questions[0];
       return { ...book, resumePage: lastQuestion ? `question-${lastQuestion.id}` : "" };
     } catch { return { ...book, resumePage: "" }; }
@@ -454,7 +455,7 @@ async function fetchWritingBooks(auth) {
 }
 
 async function getWritingBooks(auth) {
-  const userId = auth.session?.user?.id;
+  const userId = auth.session?.user?.id || (auth.authKind === "gift" && auth.giftSession?.bookId ? `gift:${auth.giftSession.bookId}` : "");
   if (!userId) return [];
   if (state.writingBooksCache?.userId === userId) {
     return state.writingBooksCache.promise || state.writingBooksCache.books || [];
@@ -516,7 +517,8 @@ function handleStoreClick(event) {
 function renderTopGnb(auth, writingBooks = []) {
   const loggedIn = Boolean(auth.session);
   const giftLoggedIn = auth.authKind === "gift" && Boolean(auth.giftSession?.bookId);
-  const mobileLoggedOut = !loggedIn && !giftLoggedIn;
+  const activeUser = loggedIn || giftLoggedIn;
+  const mobileLoggedOut = !activeUser;
   const isAdmin = auth.isAdmin === true;
   const signature = JSON.stringify({
     loggedIn,
@@ -537,17 +539,20 @@ function renderTopGnb(auth, writingBooks = []) {
   const storyMenu = `<div class="home-story-menu"><a class="home-story-link" href="#books" aria-haspopup="true">내 이야기</a><div class="home-story-popover" role="menu" aria-label="내 이야기 목록">${storyBooks}</div></div>`;
   const createItem = `<a class="home-create-link home-icon-link" href="#create" aria-label="나의 이야기 만들기"><img src="/assets/icn_add_note.svg" alt="" aria-hidden="true"></a>`;
   const profileMenu = `<div class="home-profile-menu"><a class="home-profile-link home-icon-link" href="#profile" aria-label="프로필 메뉴" aria-haspopup="true"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a><div class="home-profile-popover" role="menu" aria-label="프로필 메뉴"><a href="#profile" role="menuitem">프로필</a><button class="home-nav-action" data-logout role="menuitem">로그아웃</button></div></div>`;
+  const giftProfileMenu = `<div class="home-profile-menu"><a class="home-profile-link home-icon-link" href="#profile" aria-label="프로필 메뉴" aria-haspopup="true"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a><div class="home-profile-popover" role="menu" aria-label="프로필 메뉴"><a href="#profile" role="menuitem">프로필</a></div></div>`;
   const mobileStoryBooks = writingBooks.length
     ? `<div class="mobile-story-books" id="mobile-story-books" data-mobile-story-panel role="menu" aria-label="내 이야기 책 목록" hidden>${writingBooks.map((book) => `<a href="#book/${book.id}/${book.resumePage}" data-mobile-menu-item role="menuitem">${escapeHtml(book.title)}</a>`).join("")}</div>`
     : "";
   const mobileStoryMenu = `<div class="mobile-story-item"><a href="#books" data-mobile-menu-item>내 이야기</a>${writingBooks.length ? `<button class="mobile-story-toggle" type="button" data-mobile-story-toggle aria-controls="mobile-story-books" aria-expanded="false" aria-label="내 이야기 책 목록 펼치기">⌄</button>` : ""}</div>${mobileStoryBooks}`;
   const mobileMenu = loggedIn
     ? `${mobileStoryMenu}<a href="#create" data-mobile-menu-item>새 이야기 만들기</a><a href="#gift-create" data-mobile-menu-item>선물하기</a><a href="#" data-store-link data-mobile-menu-item>스토어</a><a href="#profile" data-mobile-menu-item>계정</a><button type="button" data-logout data-mobile-menu-item>로그아웃</button>`
-    : `<a href="#login" data-mobile-menu-item>로그인</a><a href="#" data-store-link data-mobile-menu-item>스토어</a>`;
+    : giftLoggedIn
+      ? `${mobileStoryMenu}<a href="#" data-store-link data-mobile-menu-item>스토어</a><a href="#profile" data-mobile-menu-item>프로필</a>`
+      : `<a href="#login" data-mobile-menu-item>로그인</a><a href="#" data-store-link data-mobile-menu-item>스토어</a>`;
   const menu = loggedIn
     ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><a href="#gift-create">선물하기</a><span class="home-divider" aria-hidden="true"></span>${createItem}<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>${auth.moments?.canWrite === true ? `<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#moments" aria-label="Moments"><img src="/assets/icn_time.svg" alt="" aria-hidden="true"></a>` : ""}${isAdmin ? `<span class="home-divider" aria-hidden="true"></span><a href="#admin/dashboard">관리자</a>` : ""}<span class="home-divider" aria-hidden="true"></span>${profileMenu}`
     : giftLoggedIn
-      ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><button class="home-nav-action" data-gift-logout>로그아웃</button>`
+      ? `${storyMenu}<span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a><span class="home-divider" aria-hidden="true"></span>${giftProfileMenu}`
       : `<a href="#login">로그인</a><span class="home-divider" aria-hidden="true"></span><a class="home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>`;
   const mobileProfileLink = mobileLoggedOut ? `<a class="mobile-profile-link" href="#login" aria-label="로그인"><img src="/assets/icn_profile.svg" alt="" aria-hidden="true"></a>` : "";
   const mobileStoreLink = mobileLoggedOut ? `<a class="mobile-store-link home-icon-link" href="#" data-store-link aria-label="네이버 스마트 스토어"><img src="/assets/icn_naver.svg" alt="" aria-hidden="true"></a>` : "";
